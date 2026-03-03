@@ -1,0 +1,52 @@
+{
+  "name": "tascan-mcp",
+  "version": "1.0.0",
+  "description": "TaScan MCP Server — AI agent integration for the universal task protocol platform. Manage projects, events, tasks, workers, QR codes, templates, and reports. Scan. Task. Done.",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "tascan-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "zod": "^4.3.6"
+  },
+  "keywords": [
+    "tascan",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "task-management",
+    "qr-code",
+    "field-operations",
+    "workforce",
+    "pwa",
+    "claude"
+  ],
+  "author": {
+    "name": "Michael Edward Love II",
+    "email": "Michael@TaScan.io",
+    "url": "https://tascan.io"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/snowbikemike/tascan-mcp.git"
+  },
+  "homepage": "https://tascan.io",
+  "bugs": {
+    "url": "https://github.com/snowbikemike/tascan-mcp/issues",
+    "email": "Michael@TaScan.io"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
