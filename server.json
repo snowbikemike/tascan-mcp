@@ -8,7 +8,13 @@
     "url": "https://github.com/snowbikemike/tascan-mcp",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "1.0.2",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://tascan-live-event.netlify.app/mcp"
+    }
+  ],
   "packages": [
     {
       "registryType": "npm",
