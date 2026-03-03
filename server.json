@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.snowbikemike/tascan-mcp",
+  "title": "TaScan",
+  "description": "Universal task protocol — manage projects, tasks, workers, QR codes, and reports.",
+  "websiteUrl": "https://tascan.io",
+  "repository": {
+    "url": "https://github.com/snowbikemike/tascan-mcp",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "tascan-mcp",
+      "version": "1.0.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TASCAN_API_KEY",
+          "description": "Your TaScan API key (generate in Admin Portal > Team > API Keys)",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "TASCAN_API_URL",
+          "description": "TaScan API base URL (default: https://tascan-live-event.netlify.app/api/v1)",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

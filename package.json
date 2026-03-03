@@ -1,6 +1,7 @@
 {
   "name": "tascan-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "mcpName": "io.github.snowbikemike/tascan-mcp",
   "description": "TaScan MCP Server — AI agent integration for the universal task protocol platform. Manage projects, events, tasks, workers, QR codes, templates, and reports. Scan. Task. Done.",
   "type": "module",
   "main": "index.js",
