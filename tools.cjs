@@ -1015,7 +1015,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        asset_id: { type: 'string', description: 'Asset ID from tascan_register_asset / tascan_list_assets' },
+        asset_id: { type: 'string', description: 'Asset ID (from tascan_register_asset or tascan_list_assets)' },
         photo_url: { type: 'string', description: 'Public URL of the assessment photo' },
         worker_name: { type: 'string', description: 'Who took the photo (optional)' }
       },
@@ -1065,6 +1065,74 @@ const TOOLS = [
         if (s.summary) text += `\n  ${s.summary}`;
       });
       return text;
+    }
+  },
+
+  {
+    name: 'tascan_list_assets',
+    description: 'List registered condition-ledger assets with their latest condition scores. Use to recover an asset_id for tascan_assess_condition or tascan_condition_history.',
+    inputSchema: {
+      type: 'object',
+      properties: { project_id: { type: 'string', description: 'Filter by project' } },
+      required: []
+    },
+    annotations: { title: 'List Condition Assets', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const path = '/assets' + (args.project_id ? `?project_id=${args.project_id}` : '');
+      const result = await api('GET', path);
+      const assets = result.data || [];
+      if (!assets.length) return 'No assets registered. Use tascan_register_asset to add one.';
+      return assets.map(a =>
+        `${a.name} (${a.id})${a.serial_number ? '\n  SN: ' + a.serial_number : ''}${a.asset_type ? ' · ' + a.asset_type : ''}${a.location_description ? '\n  Location: ' + a.location_description : ''}`
+      ).join('\n\n');
+    }
+  },
+
+  // ─── Gig Payments (verification-gated direct payer→worker) ───────
+  {
+    name: 'tascan_request_payment',
+    description: 'Pledge a payment on a task list: when the list is verified complete (every task done + photo evidence on photo-required tasks), the payer automatically receives a Stripe pay link that routes the money DIRECTLY to the worker (0% TaScan fee). No money moves and no card is stored at pledge time. The worker must have completed payout onboarding (Get Paid on their profile).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_list_id: { type: 'string', description: 'Task list the payment is tied to' },
+        worker_id: { type: 'string', description: 'Worker who gets paid' },
+        amount_cents: { type: 'number', description: 'Amount in cents ($1 min, $10,000 max)' },
+        payer_email: { type: 'string', description: 'Who pays — receives the pay link on verification' },
+        payer_name: { type: 'string' },
+        memo: { type: 'string', description: 'What the payment is for (shown to the payer)' }
+      },
+      required: ['task_list_id', 'worker_id', 'amount_cents', 'payer_email']
+    },
+    annotations: { title: 'Request Verified Payment', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/payments', args);
+      const p = result.data;
+      return `Payment pledged: $${(p.amount_cents / 100).toFixed(2)} to worker ${p.worker_id}\n\nID: ${p.id}\nStatus: ${p.status}\nPayer: ${p.payer_email}\n\n${result.note || 'Pay link is issued automatically when the list is verified complete.'}`;
+    }
+  },
+  {
+    name: 'tascan_list_payments',
+    description: 'List gig payments and their lifecycle status: awaiting_completion (pledged, work not verified yet), ready_to_pay (verified — pay link sent to payer), paid, canceled. Filter by task list or status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_list_id: { type: 'string', description: 'Filter by task list' },
+        status: { type: 'string', enum: ['awaiting_completion', 'ready_to_pay', 'paid', 'canceled'], description: 'Filter by status' }
+      },
+      required: []
+    },
+    annotations: { title: 'List Gig Payments', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const qs = [];
+      if (args.task_list_id) qs.push(`task_list_id=${args.task_list_id}`);
+      if (args.status) qs.push(`status=${args.status}`);
+      const result = await api('GET', '/payments' + (qs.length ? '?' + qs.join('&') : ''));
+      const payments = result.data || [];
+      if (!payments.length) return 'No payments found.';
+      return payments.map(p =>
+        `$${(p.amount_cents / 100).toFixed(2)} — ${p.status.toUpperCase()}\n  ID: ${p.id}\n  List: ${p.task_list_id}\n  Payer: ${p.payer_email}${p.memo ? '\n  Memo: ' + p.memo : ''}${p.paid_at ? '\n  Paid: ' + p.paid_at : p.released_at ? '\n  Link issued: ' + p.released_at : ''}`
+      ).join('\n\n');
     }
   },
 
