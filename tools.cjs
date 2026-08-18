@@ -282,7 +282,9 @@ const TOOLS = [
     },
     annotations: { title: 'Dispatch to AI Agent', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     handler: async (args, api) => {
-      const allAgents = [...AGENT_REGISTRY, ...dynamicAgents];
+      let registered = [];
+      try { registered = (await api('GET', '/agents')).data || []; } catch (e) { /* registry unreachable — fall back to seeds */ }
+      const allAgents = [...AGENT_REGISTRY, ...dynamicAgents, ...registered.filter(r => !AGENT_REGISTRY.some(s => s.id === r.id))];
       const agentQuery = (args.agent || 'claude-code-local').toLowerCase();
       const agent = allAgents.find(a => a.id === agentQuery || a.name.toLowerCase() === agentQuery) || allAgents[0];
       const title = args.priority === 'urgent' ? `🔴 ${args.task}` : args.task;
@@ -299,8 +301,10 @@ const TOOLS = [
       required: []
     },
     annotations: { title: 'List AI Agents', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    handler: async () => {
-      const allAgents = [...AGENT_REGISTRY, ...dynamicAgents];
+    handler: async (args, api) => {
+      let registered = [];
+      try { registered = (await api('GET', '/agents')).data || []; } catch (e) { /* registry unreachable — fall back to seeds */ }
+      const allAgents = [...AGENT_REGISTRY, ...dynamicAgents, ...registered.filter(r => !AGENT_REGISTRY.some(s => s.id === r.id))];
       const summary = allAgents.map(a =>
         `${a.name} (${a.id})\n  Type: ${a.type} | Model: ${a.model}\n  Worker ID: ${a.worker_id}\n  Inbox: ${a.inbox_id}\n  Capabilities: ${a.capabilities.join(', ')}\n  Location: ${a.location}\n  Status: ${a.status}\n  ${a.description}`
       ).join('\n\n');
@@ -326,26 +330,22 @@ const TOOLS = [
       required: ['id', 'name', 'type', 'inbox_id', 'capabilities']
     },
     annotations: { title: 'Register AI Agent', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-    handler: async (args) => {
-      const existing = [...AGENT_REGISTRY, ...dynamicAgents].find(a => a.id === args.id);
-      if (existing) {
-        Object.assign(existing, args, { status: 'active' });
-        return `Agent "${args.name}" (${args.id}) updated in registry.\n\n${JSON.stringify(existing, null, 2)}`;
-      }
-      const agent = {
+    handler: async (args, api) => {
+      // Durable registration (Patent 10 Cl. 2): persists to the agent_registry
+      // table via the API — survives cold starts and spans both transports
+      const result = await api('POST', '/agents', {
         id: args.id,
         name: args.name,
         type: args.type,
-        model: args.model || 'unknown',
-        worker_id: args.worker_id || 'unassigned',
+        model: args.model,
+        worker_id: args.worker_id,
         inbox_id: args.inbox_id,
-        capabilities: args.capabilities || ['DEFAULT'],
-        location: args.location || 'unknown',
-        status: 'active',
-        description: args.description || `${args.name} agent`
-      };
-      dynamicAgents.push(agent);
-      return `Agent "${args.name}" registered!\n\nID: ${agent.id}\nInbox: ${agent.inbox_id}\nCapabilities: ${agent.capabilities.join(', ')}\nStatus: active\n\nUse tascan_dispatch_to_agent with agent="${agent.id}" to send tasks.\n\n${JSON.stringify(agent, null, 2)}`;
+        capabilities: args.capabilities,
+        location: args.location,
+        description: args.description
+      });
+      const agent = result.data;
+      return `Agent "${agent.name}" registered (durable)!\n\nID: ${agent.id}\nInbox: ${agent.inbox_id}\nCapabilities: ${agent.capabilities.join(', ')}\nStatus: ${agent.status}\n\nUse tascan_dispatch_to_agent with agent="${agent.id}" to send tasks.\n\n${JSON.stringify(agent, null, 2)}`;
     }
   },
   {
@@ -776,7 +776,7 @@ const TOOLS = [
       text += `--- ANALYSIS ---\n`;
       text += `Summary: ${d.analysis?.summary || 'N/A'}\n`;
       text += `Classification: ${d.analysis?.classification?.type || 'N/A'} (${d.analysis?.classification?.severity || 'N/A'})\n`;
-      text += `Urgency: ${d.analysis?.urgency_score || 'N/A'}/10\n`;
+      text += `Urgency: ${d.analysis?.urgency_score ?? 'N/A'}/100\n`;
       if (d.analysis?.root_cause_hypotheses?.length) {
         text += `Root Causes:\n`;
         d.analysis.root_cause_hypotheses.forEach((h, i) => {
