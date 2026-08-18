@@ -917,6 +917,177 @@ const TOOLS = [
       });
       return text;
     }
+  },
+
+  // ─── Geofenced Zones (Patent 7: location-triggered delivery) ─────
+  {
+    name: 'tascan_create_zone',
+    description: 'Create a geofenced work zone. Delivery zones route workers who open the project Site Gate (geo.html?project=...) to this zone\'s task list when GPS places them inside the radius. Set enforce_on_list=true to zone-lock the task list — workers cannot start it from outside the zone.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Zone name (e.g. "Stage Left", "Loading Dock")' },
+        lat: { type: 'number', description: 'Zone center latitude' },
+        lng: { type: 'number', description: 'Zone center longitude' },
+        radius_m: { type: 'number', description: 'Radius in meters (default 150, min 10, max 100000)' },
+        project_id: { type: 'string', description: 'Project this zone belongs to' },
+        task_list_id: { type: 'string', description: 'Task list the Site Gate routes workers to when they are inside this zone' },
+        enforce_on_list: { type: 'boolean', description: 'Zone-lock the task list — it cannot be started from outside the radius' },
+        description: { type: 'string', description: 'Shown to workers on the Site Gate page' }
+      },
+      required: ['name', 'lat', 'lng']
+    },
+    annotations: { title: 'Create Geofenced Zone', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/zones', args);
+      const z = result.data;
+      let text = `Zone created: ${z.name}\n\nID: ${z.id}\nCenter: ${z.lat}, ${z.lng}\nRadius: ${z.radius_m}m\nRoutes to list: ${z.task_list_id || '(none — set task_list_id to enable Site Gate routing)'}\nZone-locked: ${z.enforce_on_list ? 'YES — list cannot start outside the zone' : 'no'}`;
+      if (z.project_id) text += `\n\nSite Gate URL (print this QR at the site entrance):\nhttps://app.tascan.io/geo.html?project=${z.project_id}`;
+      return text;
+    }
+  },
+  {
+    name: 'tascan_list_zones',
+    description: 'List geofenced work zones, optionally filtered by project. Shows center, radius, routing target, and zone-lock status.',
+    inputSchema: {
+      type: 'object',
+      properties: { project_id: { type: 'string', description: 'Filter by project' } },
+      required: []
+    },
+    annotations: { title: 'List Geofenced Zones', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const path = '/zones' + (args.project_id ? `?project_id=${args.project_id}` : '');
+      const result = await api('GET', path);
+      const zones = result.data || [];
+      if (!zones.length) return 'No zones configured. Use tascan_create_zone to add one.';
+      return zones.map(z =>
+        `${z.name} (${z.id})\n  Center: ${z.lat}, ${z.lng} · Radius: ${z.radius_m}m · ${z.is_active ? 'active' : 'INACTIVE'}\n  Routes to: ${z.task_list_id || '—'} · Zone-locked: ${z.enforce_on_list ? 'yes' : 'no'}`
+      ).join('\n\n');
+    }
+  },
+  {
+    name: 'tascan_update_zone',
+    description: 'Update a geofenced zone — move the center, resize the radius, change the routing target, toggle zone-lock, or deactivate it (is_active=false).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        zone_id: { type: 'string', description: 'Zone ID' },
+        name: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' },
+        radius_m: { type: 'number' }, task_list_id: { type: 'string' },
+        enforce_on_list: { type: 'boolean' }, is_active: { type: 'boolean' }
+      },
+      required: ['zone_id']
+    },
+    annotations: { title: 'Update Geofenced Zone', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const { zone_id, ...updates } = args;
+      const result = await api('PUT', `/zones/${zone_id}`, updates);
+      return `Zone updated:\n\n${JSON.stringify(result.data, null, 2)}`;
+    }
+  },
+
+  // ─── Condition Ledger (Patent 12: longitudinal asset condition) ──
+  {
+    name: 'tascan_register_asset',
+    description: 'Register a physical asset (equipment, structure, vehicle, machine) in the condition ledger so it can be assessed over time. Each asset gets a longitudinal condition history with AI scoring and degradation trajectory.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Asset name (e.g. "LED Wall Processor #3")' },
+        serial_number: { type: 'string', description: 'Serial number or asset tag (unique per org)' },
+        asset_type: { type: 'string', description: 'Type (e.g. "LED processor", "forklift", "scaffold")' },
+        description: { type: 'string', description: 'Context the AI assessor should know' },
+        location_description: { type: 'string' },
+        project_id: { type: 'string' }
+      },
+      required: ['name']
+    },
+    annotations: { title: 'Register Condition Asset', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/assets', args);
+      const a = result.data;
+      return `Asset registered: ${a.name}\n\nID: ${a.id}${a.serial_number ? '\nSerial: ' + a.serial_number : ''}\n\nUse tascan_assess_condition with a photo URL to record its first condition assessment.`;
+    }
+  },
+  {
+    name: 'tascan_assess_condition',
+    description: 'Run an AI condition assessment of an asset from a photo. The model scores 0-100 with the asset\'s full assessment history in context, so it reads degradation over time — returning the Condition Delta Score vs the previous assessment, defects, wear indicators, maintenance recommendations, and a degradation trajectory. Sensor-free predictive maintenance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        asset_id: { type: 'string', description: 'Asset ID from tascan_register_asset / tascan_list_assets' },
+        photo_url: { type: 'string', description: 'Public URL of the assessment photo' },
+        worker_name: { type: 'string', description: 'Who took the photo (optional)' }
+      },
+      required: ['asset_id', 'photo_url']
+    },
+    annotations: { title: 'Assess Asset Condition', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    handler: async (args) => {
+      const resp = await fetch('https://app.tascan.io/api/assess-condition', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset_id: args.asset_id, photo_url: args.photo_url, worker_name: args.worker_name || null, source: 'api' })
+      });
+      const data = await resp.json();
+      if (!resp.ok) return `Assessment failed: ${data.error || resp.status}`;
+      const a = data.assessment;
+      const f = a.findings || {};
+      let text = `Condition Assessment — ${data.asset.name}\n\n`;
+      text += `Score: ${a.condition_score ?? 'N/A'}/100 (${a.condition_grade || 'ungraded'})`;
+      if (data.delta_score != null) text += ` · Delta vs previous: ${data.delta_score > 0 ? '+' : ''}${data.delta_score}`;
+      text += `\nTrajectory: ${f.trajectory || 'unknown'}${f.trajectory_note ? ' — ' + f.trajectory_note : ''}\n`;
+      if (f.defects?.length) text += `\nDefects:\n${f.defects.map(d => '  - ' + d).join('\n')}\n`;
+      if (f.wear_indicators?.length) text += `\nWear indicators:\n${f.wear_indicators.map(d => '  - ' + d).join('\n')}\n`;
+      if (f.recommendations?.length) text += `\nRecommendations:\n${f.recommendations.map(d => '  - ' + d).join('\n')}\n`;
+      text += `\nSummary: ${a.summary || '—'}\nHistory depth: ${data.history_depth} prior assessment(s)`;
+      return text;
+    }
+  },
+  {
+    name: 'tascan_condition_history',
+    description: 'Get an asset\'s longitudinal condition history — score trend over time, every assessment with grade, delta, findings, and who assessed it. The per-serial-number condition ledger.',
+    inputSchema: {
+      type: 'object',
+      properties: { asset_id: { type: 'string', description: 'Asset ID' } },
+      required: ['asset_id']
+    },
+    annotations: { title: 'Get Condition History', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('GET', `/assets/${args.asset_id}`);
+      const a = result.data;
+      let text = `${a.name}${a.serial_number ? ' · SN ' + a.serial_number : ''}\n`;
+      text += `Latest score: ${a.latest_score ?? 'never assessed'}\n`;
+      if (a.score_trend?.length > 1) text += `Trend (oldest→newest): ${a.score_trend.join(' → ')}\n`;
+      text += `\n${(a.assessments || []).length} assessment(s):\n`;
+      (a.assessments || []).forEach(s => {
+        text += `\n${s.created_at.slice(0, 16).replace('T', ' ')} — ${s.condition_score ?? '?'}/100 (${s.condition_grade || '?'})`;
+        if (s.delta_score != null) text += ` [${s.delta_score > 0 ? '+' : ''}${s.delta_score}]`;
+        if (s.summary) text += `\n  ${s.summary}`;
+      });
+      return text;
+    }
+  },
+
+  // ─── Worker Passport (Patent 4 foundation) ───────────────────────
+  {
+    name: 'tascan_get_worker_passport',
+    description: 'Get a worker\'s verified work passport — task counts, lists worked, photos submitted, GPS-verified hours, points, streaks, and earned merit badges, all computed from real completion data (not self-reported). Includes the shareable profile URL.',
+    inputSchema: {
+      type: 'object',
+      properties: { worker_id: { type: 'string', description: 'Worker ID' } },
+      required: ['worker_id']
+    },
+    annotations: { title: 'Get Worker Passport', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('GET', `/workers/${args.worker_id}/passport`);
+      const p = result.data;
+      const s = p.stats;
+      return `Worker Passport — ${p.worker.name}\n\n` +
+        `Tasks completed: ${s.total_tasks}\nLists worked: ${s.total_lists}\nPhotos submitted: ${s.photos_submitted}\n` +
+        `Verified hours: ${s.verified_hours}\nPoints: ${s.total_points} · Streak: ${s.current_streak} (best ${s.longest_streak})\n` +
+        `Member since: ${(s.member_since || '').slice(0, 10)}\n\n` +
+        `Badges: ${p.badges.length ? p.badges.join(' · ') : 'none yet'}\n\nShareable profile: ${p.profile_url}`;
+    }
   }
 ];
 
