@@ -1,8 +1,8 @@
 {
   "name": "tascan-mcp",
-  "version": "1.0.1",
+  "version": "3.0.0",
   "mcpName": "io.github.snowbikemike/tascan-mcp",
-  "description": "TaScan MCP Server — AI agent integration for the universal task protocol platform. Manage projects, events, tasks, workers, QR codes, templates, and reports. Scan. Task. Done.",
+  "description": "TaScan MCP Server — Closed-loop autonomous operations protocol. 36 tools for projects, tasks, workers, QR codes, NFC tag registry, scan verification, AI issue analysis, and autonomous remediation dispatch. 12 patents filed (335+ claims). Task. Scan. Done.",
   "type": "module",
   "main": "index.js",
   "bin": {
@@ -13,6 +13,7 @@
   },
   "files": [
     "index.js",
+    "tools.cjs",
     "README.md",
     "LICENSE"
   ],

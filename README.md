@@ -1,16 +1,32 @@
 # TaScan MCP Server
 
-AI agent integration for [TaScan](https://tascan.io) — the universal task protocol platform. Manage projects, events, tasks, workers, QR codes, templates, and completion reports through Claude, GitHub Copilot, or any MCP-compatible AI client.
+AI agent integration for [TaScan](https://tascan.io) — the closed-loop autonomous operations protocol. Manage projects, events, tasks, workers, QR codes, templates, completion reports, and AI-powered issue resolution through Claude, GitHub Copilot, or any MCP-compatible AI client.
 
-**Scan. Task. Done.**
+**Task. Scan. Done.**
 
 ## What is TaScan?
 
 TaScan is a zero-download task assignment and verification platform for physical-world work. Workers scan a QR code, complete tasks with photo verification, and managers get real-time completion reports — no app download, no login, no training required.
 
+When something breaks, AI analyzes the issue, generates fix instructions, and dispatches them to the right worker — closing the loop autonomously in under 10 seconds.
+
 Industries: live events, construction, hospitality, warehousing, property management, healthcare, aviation, FEMA disaster response, and more.
 
-## Installation
+**10 Provisional Patents Filed** — 265 claims, ~1000+ pages of specification. USPTO Applications #63/995,189 through #64/001,286.
+
+## Quickest Start: Claude.ai / Claude Mobile
+
+No install required. Add TaScan as a custom connector in Claude:
+
+1. **Settings > Connectors > Add custom connector**
+2. Enter: `https://app.tascan.io/mcp`
+3. First time you use a tool, sign in with your TaScan email and password
+
+That's it. Works on claude.ai and Claude mobile. Same sign-in experience as GitHub, Netlify, and Supabase connectors.
+
+---
+
+## Installation (Claude Desktop / Claude Code)
 
 ```bash
 npm install tascan-mcp
@@ -29,7 +45,7 @@ npx tascan-mcp
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `TASCAN_API_KEY` | Yes | Your TaScan API key (generate in Admin Portal > Team > API Keys) |
-| `TASCAN_API_URL` | No | API base URL (default: `https://tascan-live-event.netlify.app/api/v1`) |
+| `TASCAN_API_URL` | No | API base URL (default: `https://app.tascan.io/api/v1`) |
 
 ### Claude Desktop
 
@@ -57,7 +73,17 @@ claude mcp add tascan -- npx -y tascan-mcp
 
 Then set your API key in the environment.
 
-## Tools (22)
+### Remote (claude.ai / Claude Mobile)
+
+TaScan MCP is also available as a remote server — no install, no API key needed:
+
+```
+https://app.tascan.io/mcp
+```
+
+Add as a custom connector in Claude (Settings > Connectors). When you first use a tool, you'll be redirected to sign in with your TaScan email and password — just like connecting GitHub or Netlify. OAuth 2.0 with PKCE handles everything automatically.
+
+## Tools (36)
 
 ### Projects
 | Tool | Description | Type |
@@ -99,7 +125,30 @@ Then set your API key in the environment.
 | `tascan_generate_qr` | Generate a QR code for an event | Create |
 | `tascan_apply_template` | Apply a pre-built template to an event | Create |
 | `tascan_list_templates` | List available task templates | Read |
-| `tascan_get_report` | Get completion report for an event | Read |
+| `tascan_get_report` | Get completion report for an event (optional `include_responses` returns submitted response data) | Read |
+| `tascan_query_responses` | One task's responses across every list in a project — chronological progression series | Read |
+
+### Closed-Loop Autonomous Operations (Patent Pending)
+| Tool | Description | Type |
+|------|-------------|------|
+| `tascan_list_issues` | List field-reported issues with filtering by status, category, severity | Read |
+| `tascan_analyze_issue` | AI classifies issue severity, identifies root cause, and scores urgency | AI |
+| `tascan_recommend_fix` | AI generates ranked remediation tasks with step-by-step instructions | AI |
+| `tascan_auto_resolve` | Full closed loop in ONE call — issue in, AI analyzes, fix dispatched, loop closes | AI |
+
+### Communications
+| Tool | Description | Type |
+|------|-------------|------|
+| `tascan_dispatch_instruction` | Multi-channel delivery of instructions to workers (SMS, email, QR) | Create |
+| `tascan_send_task_email` | Send task links and notifications via email | Create |
+| `tascan_complete_task` | Mark a task as completed with optional response data | Update |
+
+### AI Agent Coordination (Patent #10)
+| Tool | Description | Type |
+|------|-------------|------|
+| `tascan_list_agents` | List registered AI agents in the system | Read |
+| `tascan_register_agent` | Register a new AI agent with capabilities | Create |
+| `tascan_dispatch_to_agent` | Route a task to a specific AI agent for execution | Create |
 
 ## Usage Examples
 
@@ -115,16 +164,15 @@ Claude will:
 4. Call tascan_generate_qr to create a scannable QR code for the foreman
 ```
 
-### Example 2: Check event completion status
+### Example 2: AI-powered autonomous issue resolution
 
 ```
-User: How's the hotel room turnover going for the Marriott project? Which rooms still need to be finished?
+User: Check if there are any open issues on the Marriott load-in and have TaScan fix them automatically.
 
 Claude will:
-1. Call tascan_list_projects to find the Marriott project
-2. Call tascan_list_events to find active room turnovers
-3. Call tascan_get_report for each event to show completion rates
-4. Summarize which tasks are incomplete and which workers are assigned
+1. Call tascan_list_issues to find open issues
+2. Call tascan_auto_resolve for each issue — AI analyzes root cause, generates fix tasks, and dispatches instructions to the nearest qualified worker via SMS
+3. Report back with resolution status and confidence scores
 ```
 
 ### Example 3: Use templates to quickly deploy an event
@@ -140,16 +188,15 @@ Claude will:
 5. Call tascan_generate_qr for the receiving dock crew
 ```
 
-### Example 4: Manage workers across multiple events
+### Example 4: Analyze and triage field issues
 
 ```
-User: Show me all our workers and which events they've completed this week. Flag anyone with a reliability score below 80%.
+User: We have 5 open issues on the concert setup. Analyze them all and tell me which ones are most urgent.
 
 Claude will:
-1. Call tascan_list_workers to get all worker profiles
-2. Call tascan_list_projects and tascan_list_events to enumerate active events
-3. Call tascan_get_report for each event to check worker completions
-4. Analyze completion data and flag underperforming workers
+1. Call tascan_list_issues to get all open issues
+2. Call tascan_analyze_issue for each one — AI classifies severity, root cause probability, and urgency score
+3. Rank by urgency and recommend which to auto-resolve vs which need human attention
 ```
 
 ## Task Types
@@ -171,7 +218,7 @@ Tasks can also be flagged as:
 
 ## Getting an API Key
 
-1. Log in to the [TaScan Admin Portal](https://tascan-live-event.netlify.app)
+1. Log in to the [TaScan Admin Portal](https://app.tascan.io)
 2. Navigate to **Team** in the sidebar
 3. Scroll to **API Keys**
 4. Click **Generate API Key**
@@ -180,11 +227,38 @@ Tasks can also be flagged as:
 
 API keys are scoped to your organization and support rate limiting (60 requests/minute).
 
+## Troubleshooting
+
+**"Connection failed" or OAuth redirect issues**
+- Verify you're using the correct URL: `https://app.tascan.io/mcp`
+- Clear your browser cache and try reconnecting
+- If using Claude Desktop, restart the app after adding the connector
+
+**"Unauthorized" or 401 errors (local npm install)**
+- Regenerate your API key in Admin Portal > Team > API Keys
+- Confirm `TASCAN_API_KEY` is set in your environment (not just in the config file)
+- Keys are organization-scoped — make sure you're using a key from the correct org
+
+**Tools not showing up in Claude**
+- Disconnect and reconnect the TaScan connector
+- For Claude Code: run `claude mcp list` to verify the server is registered
+- Check that your TaScan account has an active organization (free tier is fine)
+
+**"Rate limited" errors**
+- Default limit is 60 requests/minute per API key
+- Pro and Business tiers have higher limits
+- Batch operations (like `tascan_add_tasks`) are more efficient than individual calls
+
+**Task completions not appearing**
+- Workers must submit via the task link (QR scan or direct URL)
+- Photo-required tasks won't show as complete until the photo uploads
+- Check the event's response mode (single vs. multi-response)
+
 ## Privacy Policy
 
 TaScan collects and processes task completion data, worker information (name, phone, email), GPS coordinates (with consent), and photos uploaded during task completion. Data is stored securely in Supabase with row-level security policies. API access is authenticated and rate-limited.
 
-For the full privacy policy, visit: https://tascan.io/privacy
+For the full privacy policy, visit: https://tascan.io/faq.html
 
 For data deletion requests or privacy inquiries, contact: Michael@TaScan.io
 
