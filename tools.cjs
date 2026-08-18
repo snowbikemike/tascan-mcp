@@ -560,7 +560,8 @@ const TOOLS = [
         text += '\n';
         if (args.include_responses && task.responses && task.responses.length > 0) {
           for (const resp of task.responses) {
-            const { value, note } = fmtResponse(resp.response_value, resp.notes);
+            const { value: v0, note } = fmtResponse(resp.response_value, resp.notes);
+            const value = (v0 == null && resp.photo_url) ? '[photo submitted]' : (v0 != null && resp.photo_url) ? v0 + ' [+photo]' : v0;
             text += `    -> ${value != null ? value : '(no value)'}${note ? ' — ' + note : ''} (${resp.worker_name}, ${resp.completed_at})\n`;
           }
         }
@@ -588,7 +589,8 @@ const TOOLS = [
       const r = result.data;
       let text = `Responses for "${r.task}" in project "${r.project_name}" (${r.matched_tasks} matching task(s), ${r.responses.length} response(s), oldest first):\n\n`;
       for (const resp of r.responses) {
-        const { value, note } = fmtResponse(resp.response_value, resp.notes);
+        const { value: v0, note } = fmtResponse(resp.response_value, resp.notes);
+        const value = (v0 == null && resp.photo_url) ? '[photo submitted]' : (v0 != null && resp.photo_url) ? v0 + ' [+photo]' : v0;
         const when = (resp.completed_at || '').slice(0, 16).replace('T', ' ');
         text += `${when} · ${resp.list_name} · ${resp.task_title}: ${value != null ? value : '(no value)'}`;
         if (note) text += ` — ${note}`;
@@ -1155,6 +1157,91 @@ const TOOLS = [
         `Verified hours: ${s.verified_hours}\nPoints: ${s.total_points} · Streak: ${s.current_streak} (best ${s.longest_streak})\n` +
         `Member since: ${(s.member_since || '').slice(0, 10)}\n\n` +
         `Badges: ${p.badges.length ? p.badges.join(' · ') : 'none yet'}\n\nShareable profile: ${p.profile_url}`;
+    }
+  },
+
+  // ─── Read-layer integrity (from the 2026-08-18 MCP audit) ────────
+  {
+    name: 'tascan_server_info',
+    description: 'Identify exactly which TaScan server and schema this MCP session is talking to. Call this FIRST when diagnosing anything — it makes "dev server masquerading as production" and "is my fix deployed yet" one tool call instead of an inference.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    annotations: { title: 'Server Info', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      let pkgVersion = 'unknown';
+      try { pkgVersion = require('./package.json').version; } catch (e) {}
+      let meta = null;
+      try { meta = (await api('GET', '/meta')).data; } catch (e) { meta = { error: String(e.message || e) }; }
+      return `TaScan MCP Server Info\n\n` +
+        `tascan-mcp package: v${pkgVersion} (${TOOLS.length} tools)\n` +
+        `API service: ${meta?.service || 'UNREACHABLE'}\n` +
+        `Host: ${meta?.host || '?'} · Environment: ${meta?.environment || '?'}\n` +
+        `Org: ${meta?.org_id || '?'}\n` +
+        `DB schema: ${meta?.schema_version || '?'}\n` +
+        `Server time: ${meta?.server_time || '?'}` +
+        (meta?.error ? `\nAPI error: ${meta.error}` : '');
+    }
+  },
+  {
+    name: 'tascan_find',
+    description: 'Cross-entity search: find projects, task lists, tasks, workers, or condition assets by name in one call — with ids and parent context to disambiguate. Use this instead of walking projects→lists→tasks or guessing ids from display names.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search text (min 2 chars, case-insensitive substring)' },
+        type: { type: 'string', enum: ['project', 'list', 'task', 'worker', 'asset'], description: 'Optional: restrict to one entity type' }
+      },
+      required: ['query']
+    },
+    annotations: { title: 'Find Anything', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      let path = `/find?q=${encodeURIComponent(args.query)}`;
+      if (args.type) path += `&type=${args.type}`;
+      const result = await api('GET', path);
+      const rows = result.data || [];
+      if (!rows.length) return `No matches for "${args.query}".`;
+      return rows.map(r => `[${r.type}] ${r.name}\n  id: ${r.id}${r.parent_id ? '\n  parent: ' + r.parent_id : ''}${r.context ? '\n  ' + r.context : ''}`).join('\n\n');
+    }
+  },
+  {
+    name: 'tascan_get_worker',
+    description: 'Ungated, plain read of one worker row: name, contact, org, points, streaks, timestamps. (tascan_get_worker_passport is the rich stats view; this is the boring lookup.)',
+    inputSchema: {
+      type: 'object',
+      properties: { worker_id: { type: 'string', description: 'Worker ID' } },
+      required: ['worker_id']
+    },
+    annotations: { title: 'Get Worker', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('GET', `/workers/${args.worker_id}`);
+      return JSON.stringify(result.data, null, 2);
+    }
+  },
+  {
+    name: 'tascan_find_duplicate_workers',
+    description: 'Find candidate same-person worker records with per-signal match detail (Patent 4 §6.25(b) signals: phone reuse, name similarity, GPS pattern correlation). Turns identity fragmentation from an accidental discovery into a monitorable metric, and feeds the merge workflow its candidate list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worker_id: { type: 'string', description: 'Anchor worker to find duplicates OF (preferred — enables phone + GPS signals)' },
+        name: { type: 'string', description: 'Or: search duplicates by display name' },
+        threshold: { type: 'number', description: 'Min confidence 0-1 (default 0.15)' }
+      },
+      required: []
+    },
+    annotations: { title: 'Find Duplicate Workers', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const qs = [];
+      if (args.worker_id) qs.push(`worker_id=${args.worker_id}`);
+      if (args.name) qs.push(`name=${encodeURIComponent(args.name)}`);
+      if (args.threshold != null) qs.push(`threshold=${args.threshold}`);
+      const result = await api('GET', '/workers/duplicates?' + qs.join('&'));
+      const d = result.data;
+      if (!d.candidates.length) return `No duplicate candidates for ${d.anchor.name || d.anchor.id}.`;
+      let text = `Duplicate candidates for ${d.anchor.name || ''} (${d.anchor.id || 'name search'}):\n`;
+      d.candidates.forEach(c => {
+        text += `\n${c.name} (${c.id}) — confidence ${c.confidence}\n  signals: ${JSON.stringify(c.signals)}\n  created ${String(c.created_at).slice(0, 10)} · last active ${String(c.last_active_at || '').slice(0, 10)} · ${c.total_points} pts`;
+      });
+      return text;
     }
   }
 ];
