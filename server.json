@@ -8,7 +8,7 @@
     "url": "https://github.com/snowbikemike/tascan-mcp",
     "source": "github"
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
     {
       "registryType": "npm",
       "identifier": "tascan-mcp",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "transport": {
         "type": "stdio"
       },

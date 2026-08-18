@@ -45,7 +45,7 @@ async function api(method, path, body) {
 }
 
 const server = new Server(
-  { name: 'tascan', version: '3.0.0' },
+  { name: 'tascan', version: '3.0.1' },
   { capabilities: { tools: {} } }
 );
 

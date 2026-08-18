@@ -13,6 +13,34 @@
 // content blocks.
 // ============================================================
 
+// ─── Response display normalization ─────────────────────
+// The worker app stores the clean value in response_value AND a raw
+// submission blob {"type","value","submitted_at"} in notes for typed
+// tasks; for checkbox tasks the human text lives only in notes.
+// Collapse to one display value, never print the blob.
+function fmtResponse(responseValue, notes) {
+  let value = responseValue;
+  if (value && typeof value === 'object') {
+    value = ('value' in value) ? value.value : JSON.stringify(value);
+  }
+  let note = notes || null;
+  if (note && typeof note === 'string' && note.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(note);
+      if (parsed && typeof parsed === 'object' && 'value' in parsed) {
+        if (value == null || value === '') value = parsed.value;
+        note = null; // pure duplicate of response_value — drop the blob
+      }
+    } catch { /* plain text note that happens to start with { — keep it */ }
+  }
+  if ((value == null || value === '') && note) {
+    // checkbox task with a typed note — the note IS the data
+    value = note;
+    note = null;
+  }
+  return { value: value == null || value === '' ? null : String(value), note };
+}
+
 const AGENT_REGISTRY = [
   {
     id: 'claude-code-local',
@@ -532,8 +560,8 @@ const TOOLS = [
         text += '\n';
         if (args.include_responses && task.responses && task.responses.length > 0) {
           for (const resp of task.responses) {
-            const val = resp.response_value != null ? JSON.stringify(resp.response_value) : '(no value)';
-            text += `    -> ${val}${resp.notes ? ' — ' + resp.notes : ''} (${resp.worker_name}, ${resp.completed_at})\n`;
+            const { value, note } = fmtResponse(resp.response_value, resp.notes);
+            text += `    -> ${value != null ? value : '(no value)'}${note ? ' — ' + note : ''} (${resp.worker_name}, ${resp.completed_at})\n`;
           }
         }
       }
@@ -560,10 +588,10 @@ const TOOLS = [
       const r = result.data;
       let text = `Responses for "${r.task}" in project "${r.project_name}" (${r.matched_tasks} matching task(s), ${r.responses.length} response(s), oldest first):\n\n`;
       for (const resp of r.responses) {
-        const val = resp.response_value != null ? JSON.stringify(resp.response_value) : '(no value)';
+        const { value, note } = fmtResponse(resp.response_value, resp.notes);
         const when = (resp.completed_at || '').slice(0, 16).replace('T', ' ');
-        text += `${when} · ${resp.list_name} · ${resp.task_title}: ${val}`;
-        if (resp.notes) text += ` — ${resp.notes}`;
+        text += `${when} · ${resp.list_name} · ${resp.task_title}: ${value != null ? value : '(no value)'}`;
+        if (note) text += ` — ${note}`;
         text += ` (${resp.worker_name})\n`;
       }
       if (r.responses.length === 0) text += '(no responses found)\n';
