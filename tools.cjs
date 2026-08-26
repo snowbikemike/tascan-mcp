@@ -896,25 +896,58 @@ const TOOLS = [
   },
   {
     name: 'tascan_get_scan_history',
-    description: 'Get scan event history for a registered NFC tag — timestamps, GPS coordinates, and accuracy for each scan',
+    description: 'Scan accountability data. Two modes: (1) tag_id — scans of a registered NFC tag; (2) task_list_id or project_id — every QR/link page-open stamp: when the code was scanned, GPS + IP + channel (qr/nfc/sms/email/link), who the scanner turned out to be, and the scan→start delta (how long between scanning and actually identifying + starting work — the sign-in-and-vanish metric).',
     inputSchema: {
       type: 'object',
       properties: {
-        tag_id: { type: 'string', description: 'Tag registry ID (from tascan_list_tags)' },
-        limit: { type: 'number', description: 'Max results (default 50)' }
+        tag_id: { type: 'string', description: 'NFC tag registry ID (from tascan_list_tags) — tag mode' },
+        task_list_id: { type: 'string', description: 'Task list ID — page-scan mode' },
+        project_id: { type: 'string', description: 'Project ID — page-scan mode, all lists in the project' },
+        source: { type: 'string', description: 'Filter page scans by channel: qr | nfc | sms | email | link | unknown' },
+        since: { type: 'string', description: 'ISO timestamp — only scans after this' },
+        limit: { type: 'number', description: 'Max results (default 50, max 200)' }
       },
-      required: ['tag_id']
+      required: []
     },
     annotations: { title: 'Get Scan History', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     handler: async (args, api) => {
-      const path = `/tags/${args.tag_id}/scans` + (args.limit ? `?limit=${args.limit}` : '');
-      const result = await api('GET', path);
-      const scans = result.data;
-      if (!scans.length) return 'No scans recorded for this tag.';
-      let text = `${scans.length} scan(s):\n\n`;
+      if (args.tag_id) {
+        const path = `/tags/${args.tag_id}/scans` + (args.limit ? `?limit=${args.limit}` : '');
+        const result = await api('GET', path);
+        const scans = result.data;
+        if (!scans.length) return 'No scans recorded for this tag.';
+        let text = `${scans.length} tag scan(s):\n\n`;
+        scans.forEach((s, i) => {
+          text += `${i + 1}. ${s.scanned_at}`;
+          if (s.gps_lat && s.gps_lng) text += ` — GPS: ${s.gps_lat.toFixed(6)}, ${s.gps_lng.toFixed(6)} (±${Math.round(s.gps_accuracy || 0)}m)`;
+          text += '\n';
+        });
+        return text;
+      }
+      if (!args.task_list_id && !args.project_id) {
+        return 'Provide tag_id (NFC tag mode) or task_list_id / project_id (page-scan mode).';
+      }
+      const qs = new URLSearchParams();
+      if (args.task_list_id) qs.set('task_list_id', args.task_list_id);
+      else qs.set('project_id', args.project_id);
+      if (args.source) qs.set('source', args.source);
+      if (args.since) qs.set('since', args.since);
+      if (args.limit) qs.set('limit', String(args.limit));
+      const result = await api('GET', '/scans?' + qs.toString());
+      const scans = result.data || [];
+      if (!scans.length) return 'No page scans recorded yet for this scope.';
+      const converted = scans.filter(s => s.converted);
+      const deltas = converted.map(s => s.scan_to_start_secs).filter(n => n != null);
+      const median = deltas.length ? deltas.sort((a, b) => a - b)[Math.floor(deltas.length / 2)] : null;
+      let text = `${scans.length} scan(s) — ${converted.length} converted to a working session (${Math.round(converted.length / scans.length * 100)}%)`;
+      if (median != null) text += ` · median scan→start ${median}s`;
+      text += '\n\n';
       scans.forEach((s, i) => {
-        text += `${i + 1}. ${s.scanned_at}`;
-        if (s.gps_lat && s.gps_lng) text += ` — GPS: ${s.gps_lat.toFixed(6)}, ${s.gps_lng.toFixed(6)} (±${Math.round(s.gps_accuracy || 0)}m)`;
+        text += `${i + 1}. ${s.scanned_at} · ${s.scan_source || 'unknown'}`;
+        if (s.worker_name) text += ` · ${s.worker_name}`;
+        text += s.converted ? ` · started +${s.scan_to_start_secs}s` : ' · NEVER STARTED';
+        if (s.ip) text += ` · ip ${s.ip}`;
+        if (s.gps_lat && s.gps_lng) text += ` · GPS ${s.gps_lat.toFixed(5)}, ${s.gps_lng.toFixed(5)}`;
         text += '\n';
       });
       return text;
