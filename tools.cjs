@@ -935,6 +935,11 @@ const TOOLS = [
         project_id: { type: 'string', description: 'Project this zone belongs to' },
         task_list_id: { type: 'string', description: 'Task list the Site Gate routes workers to when they are inside this zone' },
         enforce_on_list: { type: 'boolean', description: 'Zone-lock the task list — it cannot be started from outside the radius' },
+        notify_on_enter: { type: 'boolean', description: 'Email the manager when a worker enters this zone (danger areas)' },
+        notify_on_exit: { type: 'boolean', description: 'Email the manager when a worker leaves this zone (accountability — sign in then disappear)' },
+        auto_clock_in: { type: 'boolean', description: 'Entering the zone writes a shift_start clock-in event' },
+        auto_clock_out: { type: 'boolean', description: 'Leaving the zone writes a shift_end clock-out event' },
+        notify_email: { type: 'string', description: 'Alert recipient override — defaults to all org admins' },
         description: { type: 'string', description: 'Shown to workers on the Site Gate page' }
       },
       required: ['name', 'lat', 'lng']
@@ -943,7 +948,7 @@ const TOOLS = [
     handler: async (args, api) => {
       const result = await api('POST', '/zones', args);
       const z = result.data;
-      let text = `Zone created: ${z.name}\n\nID: ${z.id}\nCenter: ${z.lat}, ${z.lng}\nRadius: ${z.radius_m}m\nRoutes to list: ${z.task_list_id || '(none — set task_list_id to enable Site Gate routing)'}\nZone-locked: ${z.enforce_on_list ? 'YES — list cannot start outside the zone' : 'no'}`;
+      let text = `Zone created: ${z.name}\n\nID: ${z.id}\nCenter: ${z.lat}, ${z.lng}\nRadius: ${z.radius_m}m\nRoutes to list: ${z.task_list_id || '(none — set task_list_id to enable Site Gate routing)'}\nZone-locked: ${z.enforce_on_list ? 'YES — list cannot start outside the zone' : 'no'}\nAlerts: enter=${z.notify_on_enter ? 'ON' : 'off'} exit=${z.notify_on_exit ? 'ON' : 'off'} · Auto-clock: in=${z.auto_clock_in ? 'ON' : 'off'} out=${z.auto_clock_out ? 'ON' : 'off'}`;
       if (z.project_id) text += `\n\nSite Gate URL (print this QR at the site entrance):\nhttps://app.tascan.io/geo.html?project=${z.project_id}`;
       return text;
     }
@@ -963,7 +968,7 @@ const TOOLS = [
       const zones = result.data || [];
       if (!zones.length) return 'No zones configured. Use tascan_create_zone to add one.';
       return zones.map(z =>
-        `${z.name} (${z.id})\n  Center: ${z.lat}, ${z.lng} · Radius: ${z.radius_m}m · ${z.is_active ? 'active' : 'INACTIVE'}\n  Routes to: ${z.task_list_id || '—'} · Zone-locked: ${z.enforce_on_list ? 'yes' : 'no'}`
+        `${z.name} (${z.id})\n  Center: ${z.lat}, ${z.lng} · Radius: ${z.radius_m}m · ${z.is_active ? 'active' : 'INACTIVE'}\n  Routes to: ${z.task_list_id || '—'} · Zone-locked: ${z.enforce_on_list ? 'yes' : 'no'}\n  Alerts: enter=${z.notify_on_enter ? 'ON' : 'off'} exit=${z.notify_on_exit ? 'ON' : 'off'} · Auto-clock: in=${z.auto_clock_in ? 'ON' : 'off'} out=${z.auto_clock_out ? 'ON' : 'off'}`
       ).join('\n\n');
     }
   },
@@ -976,7 +981,10 @@ const TOOLS = [
         zone_id: { type: 'string', description: 'Zone ID' },
         name: { type: 'string' }, lat: { type: 'number' }, lng: { type: 'number' },
         radius_m: { type: 'number' }, task_list_id: { type: 'string' },
-        enforce_on_list: { type: 'boolean' }, is_active: { type: 'boolean' }
+        enforce_on_list: { type: 'boolean' }, is_active: { type: 'boolean' },
+        notify_on_enter: { type: 'boolean' }, notify_on_exit: { type: 'boolean' },
+        auto_clock_in: { type: 'boolean' }, auto_clock_out: { type: 'boolean' },
+        notify_email: { type: 'string' }
       },
       required: ['zone_id']
     },
