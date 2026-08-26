@@ -973,6 +973,7 @@ const TOOLS = [
         auto_clock_in: { type: 'boolean', description: 'Entering the zone writes a shift_start clock-in event' },
         auto_clock_out: { type: 'boolean', description: 'Leaving the zone writes a shift_end clock-out event' },
         notify_email: { type: 'string', description: 'Alert recipient override — defaults to all org admins' },
+        polygon: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'Polygon/rectangle zone instead of a circle: vertices as [[lat,lng], ...], at least 3.  lat/lng/radius_m are then computed (centroid + bounding radius) — still pass lat/lng but they are overridden.' },
         description: { type: 'string', description: 'Shown to workers on the Site Gate page' }
       },
       required: ['name', 'lat', 'lng']
@@ -1017,7 +1018,8 @@ const TOOLS = [
         enforce_on_list: { type: 'boolean' }, is_active: { type: 'boolean' },
         notify_on_enter: { type: 'boolean' }, notify_on_exit: { type: 'boolean' },
         auto_clock_in: { type: 'boolean' }, auto_clock_out: { type: 'boolean' },
-        notify_email: { type: 'string' }
+        notify_email: { type: 'string' },
+        polygon: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'Replace geometry with a polygon ([[lat,lng],...], ≥3 vertices); pass null to revert to a circle' }
       },
       required: ['zone_id']
     },
