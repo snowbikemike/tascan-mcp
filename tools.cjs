@@ -954,6 +954,39 @@ const TOOLS = [
     }
   },
 
+  // ─── Worker Marketplace (Patent 4: portable reputation) ──────────
+  {
+    name: 'tascan_search_marketplace',
+    description: 'Search the cross-org Worker Marketplace: workers who opted in (discoverable=true on their passport), ranked by passkey trust tier + verified completion volume.  Skills are AI-inferred from REAL completed work, not resumes — each carries a verified_task_count and a civilian_equivalent job title.  Returns sanitized public cards only (first name + last initial, skills, stats, passport URL) — never phone, email, or org membership.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Skill, category, name, or civilian job title — e.g. "forklift", "LED wall", "AV technician"' },
+        min_completions: { type: 'number', description: 'Only workers with at least this many verified completions' },
+        limit: { type: 'number', description: 'Max cards (default 25, max 50)' }
+      },
+      required: []
+    },
+    annotations: { title: 'Search Worker Marketplace', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const qs = new URLSearchParams();
+      if (args.q) qs.set('q', args.q);
+      if (args.min_completions) qs.set('min_completions', String(args.min_completions));
+      if (args.limit) qs.set('limit', String(args.limit));
+      const result = await api('GET', '/marketplace' + (qs.toString() ? '?' + qs.toString() : ''));
+      const cards = result.data || [];
+      if (!cards.length) return 'No discoverable workers match.  Workers appear after opting in on their own passport (profile page → "List me").';
+      return cards.map(w => {
+        let t = `${w.name}${w.passkey_verified ? ' ✓ID-VERIFIED' : ''} — ${w.completions} verified completions · ${w.points} pts · since ${w.member_since}`;
+        if (w.skills.length) t += '\n  Skills: ' + w.skills.map(s => `${s.skill} (${s.verified_task_count}×)`).join(', ');
+        const civ = [...new Set(w.skills.map(s => s.civilian_equivalent).filter(Boolean))];
+        if (civ.length) t += '\n  Civilian equivalent: ' + civ.join(' · ');
+        t += '\n  Passport: ' + w.passport_url;
+        return t;
+      }).join('\n\n');
+    }
+  },
+
   // ─── Geofenced Zones (Patent 7: location-triggered delivery) ─────
   {
     name: 'tascan_create_zone',
