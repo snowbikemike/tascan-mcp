@@ -420,6 +420,49 @@ const TOOLS = [
     }
   },
   {
+    name: 'tascan_reply_with_list',
+    description: 'Reply to a task list WITH a task list — the two-way tasking primitive. Creates a new list linked into the parent\'s thread, aimed back at whoever sent the original (e.g. "Grant access — pick a window" with response_type date, or an info request with response_type text). The org gets pinged; the thread shows in both the worker portal and Simple Mode. Use tascan_get_thread-style follow-up via tascan_list_projects/tascan_get_report to read answers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        parent_list_id: { type: 'string', description: 'The list being replied to' },
+        title: { type: 'string', description: 'Reply list title (e.g. "Before I can start...")' },
+        author_name: { type: 'string', description: 'Who is replying (shown in the thread)' },
+        tasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string' },
+              response_type: { type: 'string', enum: ['checkbox', 'text', 'number', 'date', 'choice', 'photo'], description: '"date" for scheduling windows, "text" for info requests, "choice" needs response_config.options' },
+              response_config: { type: 'object' }
+            },
+            required: ['title']
+          },
+          description: 'Items the recipient answers — each becomes a typed task'
+        }
+      },
+      required: ['parent_list_id', 'title', 'tasks']
+    },
+    annotations: { title: 'Reply With a List', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args) => {
+      const resp = await fetch('https://app.tascan.io/.netlify/functions/list-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parent_list_id: args.parent_list_id,
+          title: args.title,
+          author_name: args.author_name,
+          tasks: args.tasks
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Reply failed');
+      return `Reply list created and linked into the thread!\n  List: ${args.title} (${data.list_id})\n  Thread: ${data.thread_id}\n  Tasks: ${data.task_count}\n  Worker link: ${data.worker_url}\nThe org has been pinged via app_messages.`;
+    }
+  },
+  {
     name: 'tascan_add_subtasks',
     description: 'Add one or more subtasks to a task (bulk). Subtasks support typed responses: "number" for per-set data (reps, weight, distance), "text" for notes, "choice" for options, "checkbox" for simple steps. Set-logging example: task "Bench Press" with subtasks Set 1/Set 2/Set 3 each response_type "number" — each completed set stores its value and timestamp, giving per-set timing for progression tracking.',
     inputSchema: {
