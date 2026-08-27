@@ -252,8 +252,25 @@ const TOOLS = [
               title: { type: 'string', description: 'Task title' },
               description: { type: 'string', description: 'Task description' },
               response_type: { type: 'string', enum: ['checkbox', 'photo', 'text', 'number', 'date', 'choice'], description: 'CRITICAL: "text" for names, phones, emails, notes, addresses, any free-form input. "photo" for tasks needing photographic proof (inspections, serial numbers, packed cases). "checkbox" ONLY for simple yes/no confirmations. "number" for numeric values. "date" for dates. "choice" for multiple-choice (needs response_config.options). Most info-collection tasks should be "text", most verification tasks should be "photo".' },
+              response_config: { type: 'object', description: 'Response configuration. For "choice": {options: ["A","B","C"]}. For "text": {placeholder, multiline}. For "number": {placeholder}. For "date": {label, include_text}.' },
               is_safety_checkpoint: { type: 'boolean', description: 'Safety-critical task flag' },
-              requires_photo: { type: 'boolean', description: 'Require photo on completion' }
+              requires_photo: { type: 'boolean', description: 'Require photo on completion' },
+              sort_order: { type: 'number', description: 'Explicit sort position (defaults to end of list, in array order)' },
+              required_equipment: { type: 'string', description: 'Equipment this task depends on (free text, e.g. "88 lb kettlebells")' },
+              subtasks: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string', description: 'Subtask title (e.g. "Set 1")' },
+                    response_type: { type: 'string', enum: ['checkbox', 'number', 'text', 'choice'], description: 'Typed subtask response. "number" for per-set values (reps/weight), "text" for notes, "choice" needs response_config.options. Default checkbox.' },
+                    response_config: { type: 'object', description: 'Same shape as task response_config' },
+                    requires_photo: { type: 'boolean' }
+                  },
+                  required: ['title']
+                },
+                description: 'Subtasks created with the task. Example set logging: [{title:"Set 1",response_type:"number"},{title:"Set 2",response_type:"number"},{title:"Set 3",response_type:"number"}]'
+              }
             },
             required: ['title']
           },
@@ -386,9 +403,11 @@ const TOOLS = [
         title: { type: 'string', description: 'New title' },
         description: { type: 'string', description: 'New description' },
         response_type: { type: 'string', enum: ['checkbox', 'photo', 'text', 'number', 'date', 'choice'], description: 'See tascan_add_tasks for guidance. "text" for info collection, "photo" for visual proof, "checkbox" for yes/no only.' },
+        response_config: { type: 'object', description: 'Response configuration. For "choice": {options: [...]}. See tascan_add_tasks.' },
         is_safety_checkpoint: { type: 'boolean', description: 'Safety-critical flag' },
         requires_photo: { type: 'boolean', description: 'Require photo' },
-        sort_order: { type: 'number', description: 'Sort position' }
+        sort_order: { type: 'number', description: 'Sort position' },
+        required_equipment: { type: 'string', description: 'Equipment this task depends on (free text)' }
       },
       required: ['task_id']
     },
@@ -398,6 +417,114 @@ const TOOLS = [
       const body = Object.fromEntries(Object.entries(updates).filter(([, v]) => v !== undefined));
       const result = await api('PUT', `/tasks/${task_id}`, body);
       return `Task updated: ${result.data.title}\n\n${JSON.stringify(result.data, null, 2)}`;
+    }
+  },
+  {
+    name: 'tascan_add_subtasks',
+    description: 'Add one or more subtasks to a task (bulk). Subtasks support typed responses: "number" for per-set data (reps, weight, distance), "text" for notes, "choice" for options, "checkbox" for simple steps. Set-logging example: task "Bench Press" with subtasks Set 1/Set 2/Set 3 each response_type "number" — each completed set stores its value and timestamp, giving per-set timing for progression tracking.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Parent task ID' },
+        subtasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Subtask title (e.g. "Set 1")' },
+              description: { type: 'string', description: 'Optional detail' },
+              response_type: { type: 'string', enum: ['checkbox', 'number', 'text', 'choice'], description: 'Default checkbox. "number" for per-set values. "choice" needs response_config.options.' },
+              response_config: { type: 'object', description: 'For "choice": {options: [...]}. For "number"/"text": {placeholder}.' },
+              requires_photo: { type: 'boolean', description: 'Require photo on completion' },
+              sort_order: { type: 'number', description: 'Explicit position (defaults to end, in array order)' }
+            },
+            required: ['title']
+          },
+          description: 'Array of subtasks to create'
+        }
+      },
+      required: ['task_id', 'subtasks']
+    },
+    annotations: { title: 'Add Subtasks', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', `/tasks/${args.task_id}/subtasks`, args.subtasks);
+      return `${result.count} subtask(s) created on task ${args.task_id}\n\n${JSON.stringify(result.data, null, 2)}`;
+    }
+  },
+  {
+    name: 'tascan_list_subtasks',
+    description: 'List the subtasks of a task, including completion state, stored response values, and completion timestamps (per-set timing).',
+    inputSchema: {
+      type: 'object',
+      properties: { task_id: { type: 'string', description: 'Parent task ID' } },
+      required: ['task_id']
+    },
+    annotations: { title: 'List Subtasks', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('GET', `/tasks/${args.task_id}/subtasks`);
+      return JSON.stringify(result.data, null, 2);
+    }
+  },
+  {
+    name: 'tascan_update_subtask',
+    description: 'Update a subtask (title, description, response_type, response_config, requires_photo, sort_order).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        subtask_id: { type: 'string', description: 'Subtask ID' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+        response_type: { type: 'string', enum: ['checkbox', 'number', 'text', 'choice'] },
+        response_config: { type: 'object' },
+        requires_photo: { type: 'boolean' },
+        sort_order: { type: 'number' }
+      },
+      required: ['subtask_id']
+    },
+    annotations: { title: 'Update Subtask', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const { subtask_id, ...updates } = args;
+      const body = Object.fromEntries(Object.entries(updates).filter(([, v]) => v !== undefined));
+      const result = await api('PUT', `/subtasks/${subtask_id}`, body);
+      return `Subtask updated: ${result.data.title}\n\n${JSON.stringify(result.data, null, 2)}`;
+    }
+  },
+  {
+    name: 'tascan_complete_subtask',
+    description: 'Complete a subtask, optionally recording a typed response_value (e.g. the weight or reps for that set). Each completion is timestamped, so consecutive set completions yield per-set durations. Returns progress including all_subtasks_complete — when true, complete the parent task with tascan_complete_task.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        subtask_id: { type: 'string', description: 'Subtask ID to complete' },
+        worker_id: { type: 'string', description: 'Worker performing the completion (optional)' },
+        response_value: { type: 'string', description: 'Typed response value (for number/text/choice subtasks), e.g. "165"' },
+        notes: { type: 'string', description: 'Optional notes' }
+      },
+      required: ['subtask_id']
+    },
+    annotations: { title: 'Complete Subtask', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', `/subtasks/${args.subtask_id}/complete`, {
+        worker_id: args.worker_id,
+        response_value: args.response_value,
+        notes: args.notes
+      });
+      const d = result.data;
+      return `Subtask completed!\n  ${d.subtask_title}${d.response_value ? ' = ' + d.response_value : ''}\n  Task: ${d.task_title}\n  Progress: ${d.subtasks_done}/${d.subtasks_total}${d.all_subtasks_complete ? '\n  ALL SUBTASKS COMPLETE — parent task is ready to complete.' : ''}`;
+    }
+  },
+  {
+    name: 'tascan_delete_subtask',
+    description: 'Delete a subtask and its completions. This action is irreversible.',
+    inputSchema: {
+      type: 'object',
+      properties: { subtask_id: { type: 'string', description: 'Subtask ID to delete' } },
+      required: ['subtask_id']
+    },
+    annotations: { title: 'Delete Subtask', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      await api('DELETE', `/subtasks/${args.subtask_id}`);
+      return `Subtask ${args.subtask_id} deleted successfully.`;
     }
   },
   {
