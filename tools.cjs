@@ -698,7 +698,7 @@ const TOOLS = [
   },
   {
     name: 'tascan_query_responses',
-    description: "Query one task's submitted responses across every list in a project — e.g. the same exercise repeated across many workout lists returns one chronological progression series instead of N report lookups. Match by task title pattern or exact task ID.",
+    description: "Query one task's submitted responses across every list in a project — e.g. the same exercise repeated across many workout lists returns one chronological progression series instead of N report lookups. Match by task title pattern or exact task ID. Subtask completions interleave into the same series labeled 'Task › Subtask' (e.g. per-set values Set 1/2/3 with their own timestamps), so set-level progression chains across lists automatically.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -719,7 +719,8 @@ const TOOLS = [
         const { value: v0, note } = fmtResponse(resp.response_value, resp.notes);
         const value = (v0 == null && resp.photo_url) ? '[photo submitted]' : (v0 != null && resp.photo_url) ? v0 + ' [+photo]' : v0;
         const when = (resp.completed_at || '').slice(0, 16).replace('T', ' ');
-        text += `${when} · ${resp.list_name} · ${resp.task_title}: ${value != null ? value : '(no value)'}`;
+        const label = resp.subtask_title ? `${resp.task_title} › ${resp.subtask_title}` : resp.task_title;
+        text += `${when} · ${resp.list_name} · ${label}: ${value != null ? value : '(no value)'}`;
         if (note) text += ` — ${note}`;
         text += ` (${resp.worker_name})\n`;
       }
