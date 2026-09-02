@@ -159,7 +159,8 @@ const TOOLS = [
         name: { type: 'string', description: 'Event name' },
         description: { type: 'string', description: 'Event description' },
         team_mode: { type: 'boolean', description: 'Team mode — shared completions' },
-        multi_instance: { type: 'boolean', description: 'Multi-instance — each worker gets isolated copy' }
+        multi_instance: { type: 'boolean', description: 'Multi-instance — each worker gets isolated copy' },
+        assigned_worker_ids: { type: 'array', items: { type: 'string' }, description: 'Worker UUIDs to assign to this event. Each gets a personal tap-to-open link. Note: a worker holds one event assignment per project — assigning moves them.' }
       },
       required: ['project_id', 'name']
     },
@@ -168,8 +169,14 @@ const TOOLS = [
       const body = { name: args.name, description: args.description };
       if (args.team_mode !== undefined) body.team_mode = args.team_mode;
       if (args.multi_instance !== undefined) body.multi_instance = args.multi_instance;
+      if (args.assigned_worker_ids) body.assigned_worker_ids = args.assigned_worker_ids;
       const result = await api('POST', `/projects/${args.project_id}/lists`, body);
-      return `Event created: ${result.data.name} (ID: ${result.data.id})\n\n${JSON.stringify(result.data, null, 2)}`;
+      let text = `Event created: ${result.data.name} (ID: ${result.data.id})\n\n${JSON.stringify(result.data, null, 2)}`;
+      if (result.data.assigned_workers?.length) {
+        text += '\n\nAssigned workers:';
+        for (const w of result.data.assigned_workers) text += `\n  ${w.name}: ${w.worker_link}`;
+      }
+      return text;
     }
   },
   {
@@ -211,7 +218,8 @@ const TOOLS = [
         description: { type: 'string', description: 'New description' },
         team_mode: { type: 'boolean', description: 'Team mode — shared completions' },
         multi_instance: { type: 'boolean', description: 'Multi-instance — each worker gets isolated copy' },
-        timer_mode: { type: 'string', description: 'Timer mode (auto or manual)' }
+        timer_mode: { type: 'string', description: 'Timer mode (auto or manual)' },
+        assigned_worker_ids: { type: 'array', items: { type: 'string' }, description: 'Worker UUIDs to assign to this event (additive — workers not named are left alone). Each gets a personal tap-to-open link. Note: a worker holds one event assignment per project — assigning moves them.' }
       },
       required: ['list_id']
     },
@@ -220,7 +228,12 @@ const TOOLS = [
       const { list_id, ...updates } = args;
       const body = Object.fromEntries(Object.entries(updates).filter(([, v]) => v !== undefined));
       const result = await api('PUT', `/lists/${list_id}`, body);
-      return `Event updated: ${result.data.name}\n\n${JSON.stringify(result.data, null, 2)}`;
+      let text = `Event updated: ${result.data.name}\n\n${JSON.stringify(result.data, null, 2)}`;
+      if (result.data.assigned_workers?.length) {
+        text += '\n\nAssigned workers:';
+        for (const w of result.data.assigned_workers) text += `\n  ${w.name}: ${w.worker_link}`;
+      }
+      return text;
     }
   },
   {
@@ -257,6 +270,7 @@ const TOOLS = [
               requires_photo: { type: 'boolean', description: 'Require photo on completion' },
               sort_order: { type: 'number', description: 'Explicit sort position (defaults to end of list, in array order)' },
               required_equipment: { type: 'string', description: 'Equipment this task depends on (free text, e.g. "88 lb kettlebells")' },
+              assigned_to: { type: 'string', description: 'Worker to assign this task to — pass the worker UUID (validated against your org and stored as the worker\'s name, which is how the worker portal matches "my tasks"). A plain name string is also accepted as-is.' },
               subtasks: {
                 type: 'array',
                 items: {
@@ -407,7 +421,8 @@ const TOOLS = [
         is_safety_checkpoint: { type: 'boolean', description: 'Safety-critical flag' },
         requires_photo: { type: 'boolean', description: 'Require photo' },
         sort_order: { type: 'number', description: 'Sort position' },
-        required_equipment: { type: 'string', description: 'Equipment this task depends on (free text)' }
+        required_equipment: { type: 'string', description: 'Equipment this task depends on (free text)' },
+        assigned_to: { type: 'string', description: 'Worker to assign this task to — pass the worker UUID (validated against your org and stored as the worker\'s name, which is how the worker portal matches "my tasks"). A plain name string is also accepted as-is. Pass null to clear.' }
       },
       required: ['task_id']
     },
@@ -610,11 +625,23 @@ const TOOLS = [
   },
   {
     name: 'tascan_list_workers',
-    description: 'List all workers (taskees) in the organization',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'List workers (taskees) in the organization. Supports filtering by name/email/phone substring, contact-info presence, and last-activity date. Each row includes completion_count (total task completions).',
+    inputSchema: { type: 'object', properties: {
+      query: { type: 'string', description: 'Substring match on name, email, or phone' },
+      has_phone: { type: 'boolean', description: 'true = only workers with a phone on file; false = only without' },
+      has_email: { type: 'boolean', description: 'true/false — same for email' },
+      active_since: { type: 'string', description: 'ISO date/datetime — only workers with last_active_at on/after this' },
+      include_inactive: { type: 'boolean', description: 'true = also include inactive workers (e.g. tombstones left by a merge or delete) — useful for auditing right after tascan_merge_workers / tascan_delete_worker' }
+    } },
     annotations: { title: 'List Workers', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     handler: async (args, api) => {
-      const result = await api('GET', '/workers');
+      const qs = [];
+      if (args.query !== undefined) qs.push(`query=${encodeURIComponent(args.query)}`);
+      if (args.has_phone !== undefined) qs.push(`has_phone=${args.has_phone}`);
+      if (args.has_email !== undefined) qs.push(`has_email=${args.has_email}`);
+      if (args.active_since !== undefined) qs.push(`active_since=${encodeURIComponent(args.active_since)}`);
+      if (args.include_inactive === true) qs.push('include_inactive=true');
+      const result = await api('GET', '/workers' + (qs.length ? '?' + qs.join('&') : ''));
       return JSON.stringify(result.data, null, 2);
     }
   },
@@ -969,6 +996,55 @@ const TOOLS = [
       text += `Analyzed: ${d.timestamps?.analyzed_at}\n`;
       text += `Recommended: ${d.timestamps?.recommended_at}\n`;
       text += `Dispatched: ${d.timestamps?.dispatched_at}\n`;
+      return text;
+    }
+  },
+
+  // ─── Twilio SMS Tool (v3.8.0) ─────────────────────────────
+  {
+    name: 'tascan_send_sms',
+    description: 'Send a transactional TaScan SMS text to a worker (by worker_id, using their phone on file) or to a raw phone number. Optionally attach a task list — the recipient gets a tap-to-open checklist link. Sends from TaScan\'s carrier-registered A2P number (or the org\'s own Twilio if BYOK). Counts against the org\'s monthly SMS quota unless BYOK. Messages are auto-prefixed with "TaScan:" per carrier registration; transactional/work-related content only, no marketing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worker_id: { type: 'string', description: 'Worker ID — sends to their phone on file (preferred over raw phone)' },
+        phone: { type: 'string', description: 'Raw phone number (e.g. "+17025551234") — used when no worker_id given' },
+        message: { type: 'string', description: 'Message text. Transactional and work-related only.' },
+        list_id: { type: 'string', description: 'Optional task list ID — appends a tap-to-open worker checklist link' },
+        include_link: { type: 'boolean', description: 'When a list_id is given, append the tap-to-open link to the SMS body (default true). Set false to send the message text alone — the link is still returned for you to share another way.' }
+      },
+      required: ['message']
+    },
+    annotations: { title: 'Send SMS', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    handler: async (args, api) => {
+      const result = await api('POST', '/sms', {
+        worker_id: args.worker_id,
+        phone: args.phone,
+        message: args.message,
+        list_id: args.list_id,
+        include_link: args.include_link
+      });
+      const d = result.data;
+      let text = `SMS sent!\n`;
+      text += `  To: ${d.worker_name ? d.worker_name + ' (' + d.to + ')' : d.to}\n`;
+      text += `  Status: ${d.sms_status}`;
+      if (d.twilio_sid) text += `\n  Twilio SID: ${d.twilio_sid}`;
+      text += `\n  Message: ${d.message_body}`;
+      if (d.short_url) text += `\n  Short link: ${d.short_url}`;
+      else if (d.worker_url) text += `\n  Checklist link: ${d.worker_url}`;
+      return text;
+    }
+  },
+  {
+    name: 'tascan_get_sms_status',
+    description: 'Check delivery status of a previously sent TaScan SMS by its Twilio SID (returned by tascan_send_sms). Shows queued/sent/delivered/undelivered/failed plus carrier error codes.',
+    inputSchema: { type: 'object', properties: { twilio_sid: { type: 'string', description: 'Twilio message SID (SM...) from tascan_send_sms' } }, required: ['twilio_sid'] },
+    annotations: { title: 'Get SMS Status', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    handler: async (args, api) => {
+      const d = (await api('GET', `/sms/${args.twilio_sid}`)).data;
+      let text = `SMS ${d.twilio_sid}\n  Status: ${d.sms_status}\n  To: ${d.to}\n  Sent: ${d.sent_at || 'not yet'}`;
+      if (d.num_segments) text += `\n  Segments: ${d.num_segments}`;
+      if (d.error_code) text += `\n  Error ${d.error_code}: ${d.error_message || ''}`;
       return text;
     }
   },
@@ -1471,7 +1547,8 @@ const TOOLS = [
       properties: {
         worker_id: { type: 'string', description: 'Anchor worker to find duplicates OF (preferred — enables phone + GPS signals)' },
         name: { type: 'string', description: 'Or: search duplicates by display name' },
-        threshold: { type: 'number', description: 'Min confidence 0-1 (default 0.15)' }
+        threshold: { type: 'number', description: 'Min confidence 0-1 (default 0.15)' },
+        include_orphans: { type: 'boolean', description: 'Also consider org-less (orphan) worker records — off by default' }
       },
       required: []
     },
@@ -1481,14 +1558,57 @@ const TOOLS = [
       if (args.worker_id) qs.push(`worker_id=${args.worker_id}`);
       if (args.name) qs.push(`name=${encodeURIComponent(args.name)}`);
       if (args.threshold != null) qs.push(`threshold=${args.threshold}`);
+      if (args.include_orphans) qs.push('include_orphans=true');
       const result = await api('GET', '/workers/duplicates?' + qs.join('&'));
       const d = result.data;
       if (!d.candidates.length) return `No duplicate candidates for ${d.anchor.name || d.anchor.id}.`;
       let text = `Duplicate candidates for ${d.anchor.name || ''} (${d.anchor.id || 'name search'}):\n`;
       d.candidates.forEach(c => {
-        text += `\n${c.name} (${c.id}) — confidence ${c.confidence}\n  signals: ${JSON.stringify(c.signals)}\n  created ${String(c.created_at).slice(0, 10)} · last active ${String(c.last_active_at || '').slice(0, 10)} · ${c.total_points} pts`;
+        text += `\n${c.name} (${c.id}) — confidence ${c.confidence}\n  signals: ${JSON.stringify(c.signals)}\n  created ${String(c.created_at).slice(0, 10)} · last active ${String(c.last_active_at || '').slice(0, 10)} · ${c.total_points} pts · ${c.merge_ready ? 'MERGE-READY' : 'blockers: ' + (c.blockers || []).join(',')}`;
       });
+      if (d.suggested_merge) {
+        text += `\n\nNext step: tascan_merge_workers(primary_worker_id=${d.suggested_merge.primary_worker_id}, duplicate_worker_ids=[${d.suggested_merge.duplicate_worker_ids.join(', ')}], dry_run=true)`;
+      }
       return text;
+    }
+  },
+  {
+    name: 'tascan_merge_workers',
+    description: 'Merge duplicate worker records into one canonical identity (Patent 4 identity consolidation). Reassigns every reference (completions, timer events, points, payments, rosters — 31 columns across 31 tables), backfills missing phone/email on the primary, sums points, and tombstones the duplicates (merged_into + is_active=false — NEVER hard-deletes). ALWAYS run with dry_run=true first and show Mike the counts; pass dry_run=false only after explicit confirmation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        primary_worker_id: { type: 'string', description: 'The canonical worker that survives (usually the one with a phone)' },
+        duplicate_worker_ids: { type: 'array', items: { type: 'string' }, description: 'Worker IDs to fold into the primary (max 20)' },
+        dry_run: { type: 'boolean', description: 'true (default) = report reassignment counts only, change nothing. false = execute atomically.' }
+      },
+      required: ['primary_worker_id', 'duplicate_worker_ids']
+    },
+    annotations: { title: 'Merge Workers', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/workers/merge', {
+        primary_worker_id: args.primary_worker_id,
+        duplicate_worker_ids: args.duplicate_worker_ids,
+        dry_run: args.dry_run !== false
+      });
+      const d = result.data;
+      const rows = Object.entries(d.counts || {}).map(([t, n]) => `  ${t}: ${n}`).join('\n') || '  (no references found)';
+      const conf = (d.conflicts || []).length ? `\nConflicts:\n  ${d.conflicts.join('\n  ')}` : '';
+      return `${d.dry_run ? 'DRY RUN — no changes made' : 'MERGE EXECUTED'}\nPrimary: ${d.primary_worker_id}\nDuplicates: ${(d.duplicate_worker_ids || []).join(', ')}\nReassignment counts:\n${rows}${conf}${d.dry_run ? '\n\nTo execute: call again with dry_run=false.' : '\nDuplicates tombstoned (merged_into set, is_active=false). Logged to worker_merge_log.'}`;
+    }
+  },
+  {
+    name: 'tascan_delete_worker',
+    description: 'Tombstone a worker record (is_active=false). REFUSES if the worker has any task/subtask completions or payments — merge those into the real worker with tascan_merge_workers instead. Never hard-deletes.',
+    inputSchema: {
+      type: 'object',
+      properties: { worker_id: { type: 'string', description: 'Worker ID to delete' } },
+      required: ['worker_id']
+    },
+    annotations: { title: 'Delete Worker', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('DELETE', `/workers/${args.worker_id}`);
+      return `Worker ${args.worker_id} tombstoned (soft delete — record retained for audit).`;
     }
   }
 ];

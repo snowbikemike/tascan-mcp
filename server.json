@@ -2,13 +2,13 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.snowbikemike/tascan-mcp",
   "title": "TaScan",
-  "description": "36 MCP tools for projects, tasks, workers, QR/NFC tags, and AI remediation. Task. Scan. Done.",
+  "description": "61 MCP tools for projects, tasks, workers, QR/NFC tags, and AI remediation. Task. Scan. Done.",
   "websiteUrl": "https://tascan.io",
   "repository": {
     "url": "https://github.com/snowbikemike/tascan-mcp",
     "source": "github"
   },
-  "version": "3.0.1",
+  "version": "3.9.0",
   "remotes": [
     {
       "type": "streamable-http",
@@ -19,7 +19,7 @@
     {
       "registryType": "npm",
       "identifier": "tascan-mcp",
-      "version": "3.0.1",
+      "version": "3.9.0",
       "transport": {
         "type": "stdio"
       },
