@@ -1,12 +1,12 @@
 {
   "name": "tascan-mcp",
-  "version": "3.9.0",
+  "version": "3.10.0",
   "mcpName": "io.github.snowbikemike/tascan-mcp",
-  "description": "TaScan MCP Server — Closed-loop autonomous operations protocol. 61 tools for projects, tasks, workers, QR codes, NFC tags, geofenced zones, AI condition assessment, worker passports, verification-gated gig payments, cross-entity search, duplicate-worker detection, worker identity merge, AI issue analysis, and autonomous remediation dispatch. 15 patents filed (470+ claims). Task. Scan. Done.",
+  "description": "TaScan MCP Server — Closed-loop autonomous operations protocol. 69 tools for projects, tasks, workers, QR codes, NFC tags, worker marketplace with consented SMS invites, geofenced zones with rules (work site / hazard + AI-verified PPE checkpoints / containment / restricted, breach alerts, zone compliance audit), AI condition assessment, worker passports, verification-gated gig payments, client invoicing from verified work (overtime / day rate / per diem / expenses), shareable report links (completion, client service report, project, evidence pack), cross-entity search, duplicate-worker detection, worker identity merge, AI issue analysis, and autonomous remediation dispatch. 15 patents filed (470+ claims). Task. Scan. Done.",
   "type": "module",
   "main": "index.js",
   "bin": {
-    "tascan-mcp": "./index.js"
+    "tascan-mcp": "index.js"
   },
   "scripts": {
     "start": "node index.js"
@@ -40,7 +40,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/snowbikemike/tascan-mcp.git"
+    "url": "git+https://github.com/snowbikemike/tascan-mcp.git"
   },
   "homepage": "https://tascan.io",
   "bugs": {
