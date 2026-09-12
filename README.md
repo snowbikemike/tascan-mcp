@@ -107,7 +107,7 @@ Add as a custom connector in Claude (Settings > Connectors). When you first use 
 | Tool | Description | Type |
 |------|-------------|------|
 | `tascan_list_tasks` | List all tasks in an event | Read |
-| `tascan_get_task` | Get task details including completions | Read |
+| `tascan_get_task` | Get task details including completions; each completion carries `photo_url` (raw storage path) + `photo_signed_url` (fetchable, ~1h, `null` when no photo) | Read |
 | `tascan_add_tasks` | Bulk-create tasks in an event | Create |
 | `tascan_update_task` | Update task title, type, flags, order | Update |
 | `tascan_delete_task` | Delete a task and its completions | Delete |
@@ -125,7 +125,15 @@ Add as a custom connector in Claude (Settings > Connectors). When you first use 
 | `tascan_generate_qr` | Generate a QR code for an event | Create |
 | `tascan_apply_template` | Apply a pre-built template to an event | Create |
 | `tascan_list_templates` | List available task templates | Read |
-| `tascan_get_report` | Get completion report for an event (optional `include_responses` returns submitted response data) | Read |
+| `tascan_get_report` | Get completion report for an event (optional `include_responses` returns submitted response data plus a per-task `photos[]` list of `{ path, signed_url, completed_at, worker_name }`) | Read |
+| `tascan_generate_report` | Mint a shareable Completion / Service (client-branded, acknowledgeable) / Project / Evidence Pack link; optionally text it | Write |
+| `tascan_list_reports` | Existing report links for a list or project with acknowledgment status | Read |
+| `tascan_invite_worker` | Consented intro to a marketplace worker: TaScan texts them, YES adds them to your org + sends the list, NO keeps them anonymous | Write |
+| `tascan_list_invites` | Your marketplace invites and their status; accepted ones carry the worker's contact | Read |
+| `tascan_zone_compliance` | Hazard-zone audit: crossings, AI-verified PPE checkpoint verdicts, breaches, injuries cross-referenced with the last PPE check (zones now carry `kind`, `required_ppe`, `task_list_on_enter`, worker SMS rules) | Read |
+| `tascan_create_invoice` | Create a client invoice from explicit line items OR from verified work (project / lists × hourly or flat rate); returns the share link and, for single-list invoices, a linked client Service Report | Write |
+| `tascan_list_invoices` | List invoices with status, totals, due dates, links; outstanding balance | Read |
+| `tascan_update_invoice` | Mark paid / overdue / cancelled, edit client details, notes, due date | Write |
 | `tascan_query_responses` | One task's responses across every list in a project — chronological progression series | Read |
 
 ### Closed-Loop Autonomous Operations (Patent Pending)
@@ -253,6 +261,21 @@ API keys are scoped to your organization and support rate limiting (60 requests/
 - Workers must submit via the task link (QR scan or direct URL)
 - Photo-required tasks won't show as complete until the photo uploads
 - Check the event's response mode (single vs. multi-response)
+
+**Photo evidence links**
+- `photo_url` is the raw storage object path (stable, never changes). `photo_signed_url` is a fetchable HTTPS link that expires after ~1 hour (server default `TASCAN_PHOTO_URL_TTL=3600`). Re-run the read tool for a fresh link; never store the signed URL.
+- `photo_signed_url: null` with a non-null `photo_url` means signing was unavailable at read time (storage hiccup). The read still succeeds — retry for the link.
+
+## Changelog
+
+### v3.11.0 — 2026-09-11
+- **Signed photo URLs in every completion payload.** Photo evidence was invisible to AI agents: `photo_url` was a bare private-bucket path with no host or token. Every read path that returns a completion now also returns `photo_signed_url` (short-lived, default 1h, tunable via `TASCAN_PHOTO_URL_TTL`), `null` when there is no photo. Covered: `tascan_get_task` (task + subtask completions), `tascan_get_report` (new per-task `photos[]` when `include_responses` is true, replacing the bare `[+photo]` marker), `tascan_list_subtasks`, `tascan_query_responses`, `tascan_list_issues` / issue analysis (issue + injury photos), `tascan_zone_compliance` (PPE checkpoint photos), `tascan_condition_history` (assessment + baseline photos).
+- One batched storage signing call per response (a 40-task list fires one request, not 40). Signing failures log and degrade to `photo_signed_url: null` with the raw path intact; the tool call never fails.
+- Single shared signing helper on the server (`photo-sign-lib`) now backs the API, the photo proxy used by the Completion / Client / Project / Evidence Pack reports, and every AI vision fetcher, so URL construction cannot drift again.
+- Remote endpoint `serverInfo.version` now reads from this package instead of a stale hardcoded string.
+
+### v3.10.0 — 2026-09-03
+- 69 tools: invoices, P2P worker payments, hazard zones with AI-verified PPE checkpoints, full RLS lockdown, agent claims.
 
 ## Privacy Policy
 

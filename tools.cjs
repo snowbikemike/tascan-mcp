@@ -395,7 +395,7 @@ const TOOLS = [
   },
   {
     name: 'tascan_get_task',
-    description: 'Get details of a specific task including completions',
+    description: 'Get details of a specific task including completions and subtasks. Each completion carries photo_url (raw storage path, stable) and photo_signed_url (short-lived fetchable URL, ~1h; null when no photo) so you can actually view the photo evidence.',
     inputSchema: {
       type: 'object',
       properties: { task_id: { type: 'string', description: 'Task ID' } },
@@ -733,7 +733,7 @@ const TOOLS = [
   },
   {
     name: 'tascan_get_report',
-    description: 'Get completion report for a task list (event) including task status, completions, workers, and photos. Set include_responses to also return the actual submitted response data (numbers, text, choices) for each completed task.',
+    description: 'Get completion report for a task list (event) including task status, completions, workers, and photos. Set include_responses to also return the actual submitted response data (numbers, text, choices) for each completed task plus a per-task photos list with fetchable signed URLs (short-lived, ~1h) for the photo evidence.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -762,7 +762,14 @@ const TOOLS = [
             text += `    -> ${value != null ? value : '(no value)'}${note ? ' — ' + note : ''} (${resp.worker_name}, ${resp.completed_at})\n`;
           }
         }
+        // Photo evidence: retrievable signed URLs (task.photos = [{ path, signed_url, completed_at, worker_name }])
+        if (args.include_responses && task.photos && task.photos.length > 0) {
+          for (const ph of task.photos) {
+            text += `    photo: ${ph.signed_url || ph.path + ' (signing unavailable)'} (${ph.worker_name}, ${ph.completed_at})\n`;
+          }
+        }
       }
+      if (args.include_responses) text += '\nphotos: signed URLs expire (~1h) — re-run this tool for fresh links.\n';
       return text;
     }
   },
@@ -793,8 +800,11 @@ const TOOLS = [
         text += `${when} · ${resp.list_name} · ${label}: ${value != null ? value : '(no value)'}`;
         if (note) text += ` — ${note}`;
         text += ` (${resp.worker_name})\n`;
+        // Photo evidence: fetchable signed URL (falls back to the raw path if signing was unavailable)
+        if (resp.photo_url) text += `    photo: ${resp.photo_signed_url || resp.photo_url + ' (signing unavailable)'}\n`;
       }
       if (r.responses.length === 0) text += '(no responses found)\n';
+      else if (r.responses.some(x => x.photo_url)) text += '\nphotos: signed URLs expire (~1h) — re-run this tool for fresh links.\n';
       return text;
     }
   },
@@ -818,8 +828,10 @@ const TOOLS = [
         text += `${i+1}. [${iss.status.toUpperCase()}] ${iss.title}\n`;
         text += `   ID: ${iss.id} | Type: ${iss.type} | Category: ${iss.category} | Severity: ${iss.severity || 'unset'}\n`;
         if (iss.tasks) text += `   Task: ${iss.tasks.title}\n`;
+        if (iss.photo_url) text += `   Photo: ${iss.photo_signed_url || iss.photo_url + ' (signing unavailable)'}\n`;
         text += `   Reported: ${iss.created_at}\n\n`;
       });
+      if (issues.some(x => x.photo_url)) text += 'photos: signed URLs expire (~1h) — re-run this tool for fresh links.\n';
       return text;
     }
   },
@@ -1210,7 +1222,9 @@ const TOOLS = [
       properties: {
         q: { type: 'string', description: 'Skill, category, name, or civilian job title — e.g. "forklift", "LED wall", "AV technician"' },
         min_completions: { type: 'number', description: 'Only workers with at least this many verified completions' },
-        limit: { type: 'number', description: 'Max cards (default 25, max 50)' }
+        limit: { type: 'number', description: 'Max cards (default 25, max 50)' },
+        city: { type: 'string', description: 'Filter by the worker\'s opt-in home city, e.g. "Las Vegas"' },
+        available: { type: 'boolean', description: 'Only workers who marked themselves available on their passport' }
       },
       required: []
     },
@@ -1220,6 +1234,8 @@ const TOOLS = [
       if (args.q) qs.set('q', args.q);
       if (args.min_completions) qs.set('min_completions', String(args.min_completions));
       if (args.limit) qs.set('limit', String(args.limit));
+      if (args.city) qs.set('city', args.city);
+      if (args.available) qs.set('available', 'true');
       const result = await api('GET', '/marketplace' + (qs.toString() ? '?' + qs.toString() : ''));
       const cards = result.data || [];
       if (!cards.length) return 'No discoverable workers match.  Workers appear after opting in on their own passport (profile page → "List me").';
@@ -1228,9 +1244,49 @@ const TOOLS = [
         if (w.skills.length) t += '\n  Skills: ' + w.skills.map(s => `${s.skill} (${s.verified_task_count}×)`).join(', ');
         const civ = [...new Set(w.skills.map(s => s.civilian_equivalent).filter(Boolean))];
         if (civ.length) t += '\n  Civilian equivalent: ' + civ.join(' · ');
-        t += '\n  Passport: ' + w.passport_url;
+        const where = [w.city ? 'Based in ' + w.city : null, w.rate ? 'Rate ' + w.rate : null, w.available ? 'Available' : null].filter(Boolean).join(' · ');
+        if (where) t += '\n  ' + where;
+        t += '\n  Passport: ' + w.passport_url + '\n  worker_id: ' + w.worker_id + ' (use with tascan_invite_worker)';
         return t;
       }).join('\n\n');
+    }
+  },
+
+  {
+    name: 'tascan_invite_worker',
+    description: 'Invite a marketplace worker to a task list — the consented intro. TaScan texts the worker from its own number ("<Your org> wants you for <list>. Reply YES to share your contact and get the list, or NO to pass."). On YES the worker appears in your org with their name + phone, receives the list link, and you get a text + a thread message. On NO or silence (7 days) you never learn who they were. Use the worker_id from tascan_search_marketplace.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        worker_id: { type: 'string', description: 'worker_id from a marketplace card' },
+        list_id: { type: 'string', description: 'Task list you want them on' },
+        message: { type: 'string', description: 'Optional short intro prepended to the text (max 240 chars)' }
+      },
+      required: ['worker_id', 'list_id']
+    },
+    annotations: { title: 'Invite Marketplace Worker', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/marketplace/invite', args);
+      const d = result.data;
+      return `Invite sent for "${d.list}" — status ${d.status}, expires ${String(d.expires_at).slice(0, 10)}.\nInvite ID: ${d.invite_id}\n${d.note}`;
+    }
+  },
+  {
+    name: 'tascan_list_invites',
+    description: 'List marketplace invites you have sent and their status (pending / accepted / declined / expired / failed). Accepted invites include the worker\'s name and phone — that is the consent boundary; pending and declined never do.',
+    inputSchema: {
+      type: 'object',
+      properties: { status: { type: 'string', enum: ['pending', 'accepted', 'declined', 'expired', 'failed'] } },
+      required: []
+    },
+    annotations: { title: 'List Marketplace Invites', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('GET', '/marketplace/invites' + (args.status ? '?status=' + args.status : ''));
+      const rows = result.data || [];
+      if (!rows.length) return 'No invites yet — search the marketplace, then tascan_invite_worker.';
+      return rows.map(r => `${r.status.toUpperCase()} · "${r.list || '—'}" · sent ${String(r.sent_at).slice(0, 10)}` +
+        (r.worker ? ` · ${r.worker.name} ${r.worker.phone} (worker_id ${r.worker.worker_id})` : '') +
+        (r.status === 'pending' ? ` · expires ${String(r.expires_at).slice(0, 10)}` : '') + `\n   invite ${r.id}`).join('\n');
     }
   },
 
@@ -1254,7 +1310,15 @@ const TOOLS = [
         auto_clock_out: { type: 'boolean', description: 'Leaving the zone writes a shift_end clock-out event' },
         notify_email: { type: 'string', description: 'Alert recipient override — defaults to all org admins' },
         polygon: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'Polygon/rectangle zone instead of a circle: vertices as [[lat,lng], ...], at least 3.  lat/lng/radius_m are then computed (centroid + bounding radius) — still pass lat/lng but they are overridden.' },
-        description: { type: 'string', description: 'Shown to workers on the Site Gate page' }
+        description: { type: 'string', description: 'Shown to workers on the Site Gate page' },
+        kind: { type: 'string', enum: ['work_site', 'hazard', 'containment', 'restricted'], description: 'What the fence MEANS. work_site: expected here (auto clock-in, list on enter). hazard: enter allowed under conditions — required_ppe + photo checkpoint verified by AI vision, the OSHA row. containment: must stay inside; leaving = breach. restricted: must stay out; entering = breach. Default work_site.' },
+        required_ppe: { type: 'array', items: { type: 'string', enum: ['hard_hat', 'safety_glasses', 'hi_vis_vest', 'gloves', 'steel_toe_boots', 'hearing_protection', 'harness', 'respirator', 'face_shield'] }, description: 'Hazard zones: PPE the worker must show at entry (pick-list so the audit reads the same words)' },
+        ppe_photo_required: { type: 'boolean', description: 'Hazard zones: pop a photo checkpoint on entry (default true when required_ppe is set)' },
+        task_list_on_enter: { type: 'string', description: 'Task list dispatched to the worker (in-app + SMS) when they cross into the zone' },
+        sms_worker_on_enter: { type: 'boolean', description: 'Text the worker the rule/list on entry, even if the app is closed' },
+        sms_worker_on_exit: { type: 'boolean', description: 'Text the worker on exit' },
+        enter_message: { type: 'string', description: 'What the worker sees / is texted on entry (default is generated from the rule)' },
+        alert_on_breach: { type: 'boolean', description: 'Email + SMS the admin on containment-exit / restricted-enter (default true)' }
       },
       required: ['name', 'lat', 'lng']
     },
@@ -1299,7 +1363,12 @@ const TOOLS = [
         notify_on_enter: { type: 'boolean' }, notify_on_exit: { type: 'boolean' },
         auto_clock_in: { type: 'boolean' }, auto_clock_out: { type: 'boolean' },
         notify_email: { type: 'string' },
-        polygon: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'Replace geometry with a polygon ([[lat,lng],...], ≥3 vertices); pass null to revert to a circle' }
+        polygon: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'Replace geometry with a polygon ([[lat,lng],...], ≥3 vertices); pass null to revert to a circle' },
+        kind: { type: 'string', enum: ['work_site', 'hazard', 'containment', 'restricted'] },
+        required_ppe: { type: 'array', items: { type: 'string', enum: ['hard_hat', 'safety_glasses', 'hi_vis_vest', 'gloves', 'steel_toe_boots', 'hearing_protection', 'harness', 'respirator', 'face_shield'] } },
+        ppe_photo_required: { type: 'boolean' }, task_list_on_enter: { type: 'string' },
+        sms_worker_on_enter: { type: 'boolean' }, sms_worker_on_exit: { type: 'boolean' },
+        enter_message: { type: 'string' }, alert_on_breach: { type: 'boolean' }
       },
       required: ['zone_id']
     },
@@ -1308,6 +1377,34 @@ const TOOLS = [
       const { zone_id, ...updates } = args;
       const result = await api('PUT', `/zones/${zone_id}`, updates);
       return `Zone updated:\n\n${JSON.stringify(result.data, null, 2)}`;
+    }
+  },
+
+  {
+    name: 'tascan_zone_compliance',
+    description: 'Hazard-zone compliance audit (OSHA / insurance): every zone crossing, PPE checkpoint verdict (complied / failed with what was missing / skipped), and breach, plus injury reports cross-referenced with the worker\'s last PPE checkpoint before the injury. Scope by project or zone, optionally by worker and date range. Same rows the printable Evidence Pack shows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string' }, zone_id: { type: 'string' }, worker_id: { type: 'string' },
+        since: { type: 'string', description: 'ISO date/time lower bound' }, until: { type: 'string', description: 'ISO date/time upper bound' }
+      },
+      required: []
+    },
+    annotations: { title: 'Zone Compliance Audit', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const qs = new URLSearchParams();
+      ['project_id', 'zone_id', 'worker_id', 'since', 'until'].forEach(k => { if (args[k]) qs.set(k, args[k]); });
+      const result = await api('GET', '/zones/compliance' + (qs.toString() ? '?' + qs.toString() : ''));
+      const d = result.data || {};
+      if (!d.zones || !d.zones.length) return 'No zones in scope. Create one with tascan_create_zone (kind: hazard, required_ppe: [...]).';
+      const s = d.summary || {};
+      let text = `Zones: ${d.zones.map(z => `${z.name} (${z.kind}${(z.required_ppe || []).length ? ', PPE: ' + z.required_ppe.join('/') : ''})`).join('; ')}\n` +
+        `Hazard entries ${s.hazard_entries} · PPE checks ${s.ppe_checks} (complied ${s.ppe_complied || 0}, failed/skipped ${s.ppe_failed}) · Breaches ${s.breaches} · Injury reports ${s.injuries}\n`;
+      const ev = (d.events || []).filter(e => e.event === 'ppe_check' || e.event === 'breach');
+      if (ev.length) text += '\nFindings:\n' + ev.slice(-40).map(e => `  ${e.at.slice(0, 16).replace('T', ' ')} · ${e.worker || 'Worker'} · ${e.zone} · ${e.event === 'breach' ? 'BREACH' : 'PPE ' + String(e.verdict).toUpperCase()}${e.missing && e.missing.length ? ' — missing ' + e.missing.join(', ') : ''}${e.confidence != null ? ' (' + Math.round(e.confidence * 100) + '%)' : ''}`).join('\n');
+      if ((d.injuries || []).length) text += '\n\nInjuries:\n' + d.injuries.map(i => `  ${i.at.slice(0, 16).replace('T', ' ')} · ${i.worker || 'Worker'} · ${i.severity || ''} · ${(i.description || '').slice(0, 80)}\n     PPE before injury: ${i.ppe_status_before_injury ? i.ppe_status_before_injury.verdict.toUpperCase() + ' at ' + i.ppe_status_before_injury.zone + ' ' + i.ppe_status_before_injury.at.slice(11, 16) + (i.ppe_status_before_injury.missing.length ? ' (missing ' + i.ppe_status_before_injury.missing.join(', ') + ')' : '') : 'no checkpoint on record'}`).join('\n');
+      return text;
     }
   },
 
@@ -1388,7 +1485,10 @@ const TOOLS = [
         text += `\n${s.created_at.slice(0, 16).replace('T', ' ')} — ${s.condition_score ?? '?'}/100 (${s.condition_grade || '?'})`;
         if (s.delta_score != null) text += ` [${s.delta_score > 0 ? '+' : ''}${s.delta_score}]`;
         if (s.summary) text += `\n  ${s.summary}`;
+        if (s.photo_url) text += `\n  photo: ${s.photo_signed_url || s.photo_url + ' (signing unavailable)'}`;
       });
+      if (a.baseline_photo_url) text += `\n\nbaseline photo: ${a.baseline_photo_signed_url || a.baseline_photo_url + ' (signing unavailable)'}`;
+      if (a.baseline_photo_url || (a.assessments || []).some(s => s.photo_url)) text += '\n\nphotos: signed URLs expire (~1h) — re-run this tool for fresh links.';
       return text;
     }
   },
@@ -1414,6 +1514,145 @@ const TOOLS = [
   },
 
   // ─── Gig Payments (verification-gated direct payer→worker) ───────
+  {
+    name: 'tascan_generate_report',
+    description: 'Mint a shareable report and get its link. Types: completion (full proof-of-work for one list: tasks, responses, subtasks, photos, GPS + place names, timing, QR pair), service (client-facing version of a list with YOUR company branding and a Client Acknowledgment button — the ack files into the list thread), project (every list in a project rolled up), evidence (compliance Evidence Pack; admin sign-in required to view). Links are stable — the same list/project returns the same link. Optionally text the link to a phone through the TaScan SMS lane.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['completion', 'service', 'project', 'evidence'] },
+        list_id: { type: 'string', description: 'Required for completion / service' },
+        project_id: { type: 'string', description: 'Required for project / evidence' },
+        company_name: { type: 'string', description: 'Service report branding (defaults to the org name)' },
+        message: { type: 'string', description: 'Service report: a note to the client shown under the header' },
+        show_workers: { type: 'boolean', description: 'Service report: show worker names (default true)' },
+        show_issues: { type: 'boolean', description: 'Service report: include reported issues (default false)' },
+        send_to_phone: { type: 'string', description: 'Text the link to this number (E.164 or 10-digit US)' },
+        send_note: { type: 'string', description: 'Short intro for the text, e.g. "Here is your report from Love Productions:"' }
+      },
+      required: ['type']
+    },
+    annotations: { title: 'Generate Report Link', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/reports', args);
+      const d = result.data;
+      let text = `${d.type.charAt(0).toUpperCase() + d.type.slice(1)} report ${d.created ? 'created' : 'ready'}:\n${d.url}`;
+      if (d.note) text += `\n(${d.note})`;
+      if (d.sms) text += d.sms.sent ? `\n\nTexted to ${d.sms.to}.` : `\n\nSMS not sent: ${d.sms.error}`;
+      return text;
+    }
+  },
+  {
+    name: 'tascan_list_reports',
+    description: 'List existing report links for a list or project (completion / service / project / evidence), newest first, with client acknowledgment status for service reports.',
+    inputSchema: {
+      type: 'object',
+      properties: { list_id: { type: 'string' }, project_id: { type: 'string' } },
+      required: []
+    },
+    annotations: { title: 'List Report Links', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const qs = new URLSearchParams();
+      if (args.list_id) qs.set('list_id', args.list_id);
+      if (args.project_id) qs.set('project_id', args.project_id);
+      const result = await api('GET', '/reports' + (qs.toString() ? '?' + qs.toString() : ''));
+      const rows = result.data || [];
+      if (!rows.length) return 'No reports yet — use tascan_generate_report.';
+      return rows.map(r => `${r.type.toUpperCase()} · ${r.title || ''} · ${r.created_at.slice(0, 10)}` +
+        (r.acknowledged_at ? ` · ✓ acknowledged by ${r.acknowledged_by || 'client'} ${r.acknowledged_at.slice(0, 10)}` : (r.type === 'service' ? ' · not yet acknowledged' : '')) +
+        (r.url ? `\n   ${r.url}` : '')).join('\n');
+    }
+  },
+  {
+    name: 'tascan_create_invoice',
+    description: 'Create a client invoice and get its shareable link. Two ways to bill: (a) pass explicit line_items, or (b) pass project_id or task_list_ids plus hourly_rate (quarter-hour billing from first→last verified completion per list) or flat_rate_per_list, and TaScan builds one line per list from VERIFIED work ("<list> — 7/7 tasks verified · Sep 1 · 1.25h"); lists with no completions are skipped. A single-list invoice also mints a client-facing Service Report (acknowledge → pay) and links it. Returns invoice number, totals, url, and the work it billed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        client_name: { type: 'string', description: 'Bill-to name (person or company)' },
+        client_email: { type: 'string' },
+        client_phone: { type: 'string' },
+        project_id: { type: 'string', description: 'Bill every list in this project (auto line items)' },
+        task_list_ids: { type: 'array', items: { type: 'string' }, description: 'Bill just these lists (auto line items)' },
+        hourly_rate: { type: 'number', description: 'Dollars per hour for auto line items' },
+        flat_rate_per_list: { type: 'number', description: 'Dollars per list for auto line items (used when no hourly_rate)' },
+        min_hours: { type: 'number', description: 'Minimum billable hours per list (e.g. 1)' },
+        billing: { type: 'object', description: 'Billing rules for auto line items. mode: hourly (default when hourly_rate given) | day_rate | flat. Overtime/double time are computed PER WORK DAY from verified completions: hours over overtime_after_hours (default 8) bill at overtime_multiplier (1.5×), hours over double_time_after_hours (12) at double_time_multiplier (2×); set overtime:false to disable. per_diem adds one line × work days (or per_diem_days). expenses are pass-through lines.', properties: {
+          mode: { type: 'string', enum: ['hourly', 'day_rate', 'flat'] },
+          hourly_rate: { type: 'number' }, day_rate: { type: 'number' }, flat_rate_per_list: { type: 'number' }, min_hours: { type: 'number' },
+          overtime: { type: 'boolean' }, overtime_after_hours: { type: 'number' }, overtime_multiplier: { type: 'number' },
+          double_time_after_hours: { type: 'number' }, double_time_multiplier: { type: 'number' },
+          per_diem: { type: 'number', description: 'Dollars per work day' }, per_diem_days: { type: 'number' },
+          expenses: { type: 'array', items: { type: 'object', properties: { description: { type: 'string' }, amount: { type: 'number' }, quantity: { type: 'number' } }, required: ['description', 'amount'] } }
+        } },
+        line_items: { type: 'array', description: 'Explicit lines instead of auto-billing', items: { type: 'object', properties: { description: { type: 'string' }, quantity: { type: 'number' }, unit_price: { type: 'number' } }, required: ['description', 'unit_price'] } },
+        tax_rate: { type: 'number', description: 'Fraction, e.g. 0.0825 for 8.25%' },
+        due_date: { type: 'string', description: 'YYYY-MM-DD (default: 30 days out)' },
+        notes: { type: 'string', description: 'Payment terms / thank-you shown on the invoice' },
+        company_name: { type: 'string', description: 'Your company name on the attached Service Report (defaults to the org name)' },
+        attach_service_report: { type: 'boolean', description: 'Mint + link a Service Report for single-list invoices (default true)' },
+        payment_options: { type: 'object', description: 'Pay-how-you-like buttons on the invoice (defaults to the org\'s saved handles). Keys: venmo (@handle), cashapp ($cashtag), paypal (paypal.me name), zelle (phone/email), applecash (phone), other (free text e.g. "cash or check"). Stripe card checkout is separate and only shows when the org has invoice_payments enabled.', properties: { venmo: { type: 'string' }, cashapp: { type: 'string' }, paypal: { type: 'string' }, zelle: { type: 'string' }, applecash: { type: 'string' }, other: { type: 'string' } } },
+        status: { type: 'string', enum: ['draft', 'sent'], description: 'Default sent' }
+      },
+      required: ['client_name']
+    },
+    annotations: { title: 'Create Invoice', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    handler: async (args, api) => {
+      const result = await api('POST', '/invoices', args);
+      const inv = result.data;
+      let text = `Invoice ${inv.invoice_number} — $${Number(inv.total).toFixed(2)} to ${inv.client_name} (${inv.status})\n\nLink: ${inv.url}\n`;
+      if (inv.service_report_url) text += `Service Report (client acknowledges here): ${inv.service_report_url}\n`;
+      text += `\nLines:\n` + (inv.line_items || []).map(li => `  • ${li.description} — ${li.quantity} × $${Number(li.unit_price).toFixed(2)} = $${Number(li.amount).toFixed(2)}`).join('\n');
+      text += `\n\nSubtotal $${Number(inv.subtotal).toFixed(2)}` + (Number(inv.tax_amount) ? ` · Tax $${Number(inv.tax_amount).toFixed(2)}` : '') + ` · Due ${inv.due_date}\nInvoice ID: ${inv.id}`;
+      return text;
+    }
+  },
+  {
+    name: 'tascan_list_invoices',
+    description: 'List invoices for the org (newest first) with status, client, total, due date and share link. Filter by status (draft/sent/paid/overdue/cancelled) or project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['draft', 'sent', 'paid', 'overdue', 'cancelled'] },
+        project_id: { type: 'string' }
+      },
+      required: []
+    },
+    annotations: { title: 'List Invoices', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const qs = new URLSearchParams();
+      if (args.status) qs.set('status', args.status);
+      if (args.project_id) qs.set('project_id', args.project_id);
+      const result = await api('GET', '/invoices' + (qs.toString() ? '?' + qs.toString() : ''));
+      const rows = result.data || [];
+      if (!rows.length) return 'No invoices yet.';
+      const outstanding = rows.filter(r => r.status === 'sent' || r.status === 'overdue').reduce((s, r) => s + Number(r.total || 0), 0);
+      return rows.map(r => `${r.invoice_number} · ${r.status.toUpperCase()} · $${Number(r.total).toFixed(2)} · ${r.client_name}${r.due_date ? ' · due ' + r.due_date : ''}${r.paid_at ? ' · paid ' + r.paid_at.slice(0, 10) : ''}\n   ${r.url}\n   id ${r.id}`).join('\n') +
+        `\n\nOutstanding: $${outstanding.toFixed(2)} across ${rows.filter(r => r.status === 'sent' || r.status === 'overdue').length} invoice(s)`;
+    }
+  },
+  {
+    name: 'tascan_update_invoice',
+    description: 'Update an invoice: mark it paid (records paid_at), overdue, cancelled, or edit client details / notes / due date.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        invoice_id: { type: 'string' },
+        status: { type: 'string', enum: ['draft', 'sent', 'paid', 'overdue', 'cancelled'] },
+        paid_at: { type: 'string', description: 'ISO timestamp (default now) when status = paid' },
+        client_name: { type: 'string' }, client_email: { type: 'string' }, client_phone: { type: 'string' },
+        notes: { type: 'string' }, due_date: { type: 'string' }
+      },
+      required: ['invoice_id']
+    },
+    annotations: { title: 'Update Invoice', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    handler: async (args, api) => {
+      const { invoice_id, ...patch } = args;
+      const result = await api('PUT', `/invoices/${invoice_id}`, patch);
+      const inv = result.data;
+      return `Invoice ${inv.invoice_number} → ${inv.status.toUpperCase()}${inv.paid_at ? ' (paid ' + inv.paid_at.slice(0, 10) + ')' : ''} · $${Number(inv.total).toFixed(2)} · ${inv.client_name}\n${inv.url}`;
+    }
+  },
   {
     name: 'tascan_request_payment',
     description: 'Pledge a payment on a task list: when the list is verified complete (every task done + photo evidence on photo-required tasks), the payer automatically receives a Stripe pay link that routes the money DIRECTLY to the worker (0% TaScan fee). No money moves and no card is stored at pledge time. The worker must have completed payout onboarding (Get Paid on their profile).',
