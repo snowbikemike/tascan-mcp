@@ -43,9 +43,10 @@ async function api(method, path, body) {
   }
   return data;
 }
+api.key = API_KEY;   // raw-fetch tools read the key from here (S99: those functions now require auth)
 
 const server = new Server(
-  { name: 'tascan', version: '3.11.0' },
+  { name: 'tascan', version: '3.12.0' },
   { capabilities: { tools: {} } }
 );
 

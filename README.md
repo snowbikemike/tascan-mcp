@@ -268,6 +268,9 @@ API keys are scoped to your organization and support rate limiting (60 requests/
 
 ## Changelog
 
+### v3.12.0 — 2026-09-12
+- `tascan_send_task_email` and `tascan_assess_condition` now send the caller's API key (the TaScan functions behind them require it after the S99 security sweep). No tool additions — still 69 tools.
+
 ### v3.11.0 — 2026-09-11
 - **Signed photo URLs in every completion payload.** Photo evidence was invisible to AI agents: `photo_url` was a bare private-bucket path with no host or token. Every read path that returns a completion now also returns `photo_signed_url` (short-lived, default 1h, tunable via `TASCAN_PHOTO_URL_TTL`), `null` when there is no photo. Covered: `tascan_get_task` (task + subtask completions), `tascan_get_report` (new per-task `photos[]` when `include_responses` is true, replacing the bare `[+photo]` marker), `tascan_list_subtasks`, `tascan_query_responses`, `tascan_list_issues` / issue analysis (issue + injury photos), `tascan_zone_compliance` (PPE checkpoint photos), `tascan_condition_history` (assessment + baseline photos).
 - One batched storage signing call per response (a 40-task list fires one request, not 40). Signing failures log and degrade to `photo_signed_url: null` with the raw path intact; the tool call never fails.

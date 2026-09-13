@@ -1079,12 +1079,12 @@ const TOOLS = [
       required: ['to_email', 'list_id']
     },
     annotations: { title: 'Send Task Email', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    handler: async (args) => {
-      // Call the send-task-email function directly via HTTP
+    handler: async (args, api) => {
+      // Call the send-task-email function directly via HTTP (S99: it now requires the caller's tsk_ key)
       const url = 'https://app.tascan.io/.netlify/functions/send-task-email';
       const resp = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ((api && api.key) || API_KEY) },
         body: JSON.stringify({
           to_email: args.to_email,
           to_name: args.to_name,
@@ -1444,10 +1444,10 @@ const TOOLS = [
       required: ['asset_id', 'photo_url']
     },
     annotations: { title: 'Assess Asset Condition', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    handler: async (args) => {
+    handler: async (args, api) => {
       const resp = await fetch('https://app.tascan.io/api/assess-condition', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ((api && api.key) || API_KEY) },
         body: JSON.stringify({ asset_id: args.asset_id, photo_url: args.photo_url, worker_name: args.worker_name || null, source: 'api' })
       });
       const data = await resp.json();
